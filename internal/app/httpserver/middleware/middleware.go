@@ -34,11 +34,13 @@ const adminIsSuperContextKey = "admin_is_super"
 const authHeaderKey = "Authorization"
 const authSchemeBearer = "Bearer"
 
-// CORSMiddleware 跨域中间件
+// CORSMiddleware 跨域中间件。
+// AllowCredentials 为 true 时禁止 "*"，也禁止把请求里的 Origin 原样反射回去；
+// 只有固定白名单中的来源才会收到 Access-Control-Allow-Origin。OPTIONS 预检走同一策略。
 func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
-	allowedOrigins := cfg.AllowedOrigins
-	if len(allowedOrigins) == 0 {
-		allowedOrigins = config.DefaultCORSAllowedOrigins()
+	allowedOrigins, droppedWildcard := normalizeCORSOrigins(cfg.AllowedOrigins, cfg.AllowCredentials)
+	if droppedWildcard {
+		logger.Warnw("cors_wildcard_ignored_with_credentials")
 	}
 	allowedMethods := cfg.AllowedMethods
 	if len(allowedMethods) == 0 {
@@ -58,15 +60,15 @@ func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 			if allowedOrigin != "*" {
 				c.Writer.Header().Add("Vary", "Origin")
+				if cfg.AllowCredentials {
+					c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
 			}
-		}
-		if cfg.AllowCredentials {
-			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
-		c.Writer.Header().Set("Access-Control-Allow-Headers", headersHeader)
-		c.Writer.Header().Set("Access-Control-Allow-Methods", methodsHeader)
-		if cfg.MaxAge > 0 {
-			c.Writer.Header().Set("Access-Control-Max-Age", strconv.Itoa(cfg.MaxAge))
+			c.Writer.Header().Set("Access-Control-Allow-Headers", headersHeader)
+			c.Writer.Header().Set("Access-Control-Allow-Methods", methodsHeader)
+			if cfg.MaxAge > 0 {
+				c.Writer.Header().Set("Access-Control-Max-Age", strconv.Itoa(cfg.MaxAge))
+			}
 		}
 
 		if c.Request.Method == http.MethodOptions {
@@ -78,25 +80,64 @@ func CORSMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
 	}
 }
 
+// normalizeCORSOrigins 去掉空白项。携带凭证时丢弃 "*"：
+// 若白名单里只剩通配符，则退回内置的固定来源列表，而不是反射任意 Origin。
+func normalizeCORSOrigins(origins []string, allowCredentials bool) (normalized []string, droppedWildcard bool) {
+	explicit := make([]string, 0, len(origins))
+	wildcard := false
+	seen := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		origin = strings.TrimSpace(origin)
+		if origin == "" || strings.ContainsAny(origin, "\r\n") {
+			continue
+		}
+		if origin == "*" {
+			wildcard = true
+			continue
+		}
+		key := strings.ToLower(origin)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		explicit = append(explicit, origin)
+	}
+	if wildcard && allowCredentials {
+		if len(explicit) == 0 {
+			return config.DefaultCORSAllowedOrigins(), true
+		}
+		return explicit, true
+	}
+	if wildcard {
+		return []string{"*"}, false
+	}
+	if len(explicit) == 0 {
+		return config.DefaultCORSAllowedOrigins(), false
+	}
+	return explicit, false
+}
+
 func resolveAllowedOrigin(origin string, allowedOrigins []string, allowCredentials bool) string {
-	if len(allowedOrigins) == 0 {
-		return ""
+	origin = strings.TrimSpace(origin)
+	if strings.ContainsAny(origin, "\r\n") {
+		origin = ""
 	}
+	wildcard := false
 	for _, allowed := range allowedOrigins {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" || strings.ContainsAny(allowed, "\r\n") {
+			continue
+		}
 		if allowed == "*" {
-			if allowCredentials && origin != "" {
-				return origin
-			}
-			return "*"
+			wildcard = true
+			continue
+		}
+		if origin != "" && strings.EqualFold(allowed, origin) {
+			return allowed
 		}
 	}
-	if origin == "" {
-		return ""
-	}
-	for _, allowed := range allowedOrigins {
-		if strings.EqualFold(allowed, origin) {
-			return origin
-		}
+	if wildcard && !allowCredentials {
+		return "*"
 	}
 	return ""
 }
