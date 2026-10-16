@@ -214,6 +214,7 @@ func (s *Service) ParseUserJWT(tokenString string) (*UserJWTClaims, error) {
 }
 
 // SendVerifyCode 发送邮箱验证码；inviteCode 仅在注册用途且开启邀请注册时校验（不核销）。
+// 重置密码和绑定 Telegram 不区分邮箱是否已注册：账号不存在时仍占用发送间隔，但不发信。
 func (s *Service) SendVerifyCode(ctx context.Context, email, purpose, locale, inviteCode string) error {
 	if s.emailService == nil {
 		return ErrEmailServiceNotConfigured
@@ -248,26 +249,13 @@ func (s *Service) SendVerifyCode(ctx context.Context, email, purpose, locale, in
 		}
 	}
 
-	if purpose == constants.VerifyPurposeReset {
+	if hidesAccountExistence(purpose) {
 		user, err := s.userRepo.GetByEmail(normalized)
 		if err != nil {
 			return err
 		}
 		if user == nil {
-			return ErrNotFound
-		}
-		if strings.TrimSpace(user.Locale) != "" {
-			locale = user.Locale
-		}
-	}
-
-	if purpose == constants.VerifyPurposeTelegramBind {
-		user, err := s.userRepo.GetByEmail(normalized)
-		if err != nil {
-			return err
-		}
-		if user == nil {
-			return ErrNotFound
+			return s.deliverVerifyCode(ctx, normalized, purpose, locale, false)
 		}
 		if strings.TrimSpace(user.Locale) != "" {
 			locale = user.Locale
@@ -544,6 +532,10 @@ func (s *Service) verifyCode(email, purpose, code string) (*emailverificationdom
 }
 
 func (s *Service) sendVerifyCode(ctx context.Context, email, purpose, locale string) error {
+	return s.deliverVerifyCode(ctx, email, purpose, locale, true)
+}
+
+func (s *Service) deliverVerifyCode(ctx context.Context, email, purpose, locale string, deliver bool) error {
 	latest, err := s.codeRepo.GetLatest(email, purpose)
 	if err != nil {
 		return err
@@ -580,6 +572,9 @@ func (s *Service) sendVerifyCode(ctx context.Context, email, purpose, locale str
 	// shortcut: 查最新记录与落库之间仍有空窗，并发请求可各发一封；出现邮件轰炸再加 Redis SETNX(email+purpose) 锁。
 	if err := s.codeRepo.Create(record); err != nil {
 		return err
+	}
+	if !deliver {
+		return nil
 	}
 	if err := s.emailService.SendVerifyCode(email, code, purpose, locale, brand); err != nil {
 		// 未送达的验证码不能占用发送间隔，也不能顶替用户手里仍有效的上一封；删除失败只退回旧行为，不掩盖发信错误
@@ -621,6 +616,15 @@ func NormalizeEmail(email string) (string, error) {
 func isVerifyPurposeSupported(purpose string) bool {
 	switch strings.ToLower(strings.TrimSpace(purpose)) {
 	case constants.VerifyPurposeRegister, constants.VerifyPurposeReset, constants.VerifyPurposeTelegramBind, constants.VerifyPurposeChangeEmailOld, constants.VerifyPurposeChangeEmailNew:
+		return true
+	default:
+		return false
+	}
+}
+
+func hidesAccountExistence(purpose string) bool {
+	switch purpose {
+	case constants.VerifyPurposeReset, constants.VerifyPurposeTelegramBind:
 		return true
 	default:
 		return false

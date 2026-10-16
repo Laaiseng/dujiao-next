@@ -408,6 +408,128 @@ func assertUniformLoginLockout(t *testing.T, rec *httptest.ResponseRecorder, ema
 	}
 }
 
+func TestAccountProbeRateLimitBlocksDistinctEmails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	verifyAuth := &probeVerifyAuth{}
+	verifyHandler := userauthhttp.NewUserVerifyHandler(probeVerifySettings{}, nil, verifyAuth)
+	passwordHandler := userauthhttp.NewUserPasswordHandler(probePassword{})
+	limit := RateLimitMiddlewareKeys(nil, RateLimitRule{
+		Prefix:        "test:account_probe",
+		WindowSeconds: 300,
+		MaxRequests:   3,
+		BlockSeconds:  300,
+		MessageKey:    "error.rate_limited",
+	}, KeyByIP, KeyByIPAndJSONField("email"))
+	router := gin.New()
+	router.POST("/api/v1/auth/send-verify-code", limit, verifyHandler.SendUserVerifyCode)
+	router.POST("/api/v1/auth/forgot-password", limit, passwordHandler.UserForgotPassword)
+
+	const ip = "203.0.113.40"
+	for i, email := range []string{"a@example.com", "b@example.com", "c@example.com"} {
+		rec := postAccountProbe(router, ip, "/api/v1/auth/send-verify-code", fmt.Sprintf(`{"email":%q,"purpose":"telegram_bind"}`, email))
+		code, msg := decodeAPI(t, rec)
+		if rec.Code != http.StatusOK || code != 0 {
+			t.Fatalf("probe %d status=%d code=%d msg=%s body=%s", i+1, rec.Code, code, msg, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "用户不存在") || strings.Contains(rec.Body.String(), "User not found") {
+			t.Fatalf("probe leaked account existence: %s", rec.Body.String())
+		}
+	}
+	if verifyAuth.calls != 3 {
+		t.Fatalf("verify calls = %d, want 3", verifyAuth.calls)
+	}
+
+	blocked := postAccountProbe(router, ip, "/api/v1/auth/send-verify-code", `{"email":"d@example.com","purpose":"telegram_bind"}`)
+	code, msg := decodeAPI(t, blocked)
+	if blocked.Code != http.StatusTooManyRequests || code != 429 {
+		t.Fatalf("enumeration status=%d code=%d body=%s", blocked.Code, code, blocked.Body.String())
+	}
+	if !strings.Contains(msg, "请求过于频繁") {
+		t.Fatalf("rate limit message = %q", msg)
+	}
+	if verifyAuth.calls != 3 {
+		t.Fatalf("blocked probe reached the handler, calls=%d", verifyAuth.calls)
+	}
+
+	shared := postAccountProbe(router, ip, "/api/v1/auth/forgot-password", `{"email":"e@example.com","code":"000000","new_password":"secret123"}`)
+	if shared.Code != http.StatusTooManyRequests {
+		t.Fatalf("forgot-password should share the probe limit, status=%d body=%s", shared.Code, shared.Body.String())
+	}
+
+	otherIP := postAccountProbe(router, "203.0.113.41", "/api/v1/auth/forgot-password", `{"email":"a@example.com","code":"000000","new_password":"secret123"}`)
+	otherCode, otherMsg := decodeAPI(t, otherIP)
+	if otherIP.Code != http.StatusOK || otherCode != 400 || otherMsg != "验证码错误" {
+		t.Fatalf("other IP status=%d code=%d msg=%q body=%s", otherIP.Code, otherCode, otherMsg, otherIP.Body.String())
+	}
+	if strings.Contains(otherIP.Body.String(), "用户不存在") {
+		t.Fatalf("forgot-password leaked account existence: %s", otherIP.Body.String())
+	}
+}
+
+func TestRateLimitMiddlewareKeysCountsDuplicateKeyOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/ping", RateLimitMiddlewareKeys(nil, RateLimitRule{
+		WindowSeconds: 60,
+		MaxRequests:   1,
+		MessageKey:    "error.rate_limited",
+	}, KeyByIP, KeyByIPAndJSONField("email")), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/ping", strings.NewReader(`{}`))
+	req.RemoteAddr = "198.51.100.1:10"
+	req.Header.Set("Content-Type", "application/json")
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, req)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, duplicate IP key was counted twice: %s", first.Code, first.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/ping", strings.NewReader(`{}`))
+	req.RemoteAddr = "198.51.100.1:10"
+	req.Header.Set("Content-Type", "application/json")
+	second := httptest.NewRecorder()
+	router.ServeHTTP(second, req)
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want 429", second.Code)
+	}
+}
+
+type probeVerifySettings struct{}
+
+func (probeVerifySettings) GetEmailVerificationEnabled(bool) (bool, error) { return true, nil }
+
+func (probeVerifySettings) GetRegistrationEnabled(bool) (bool, error) { return true, nil }
+
+type probeVerifyAuth struct {
+	calls int
+}
+
+func (s *probeVerifyAuth) SendVerifyCode(context.Context, string, string, string, string) error {
+	s.calls++
+	return nil
+}
+
+type probePassword struct{}
+
+func (probePassword) GetEmailVerificationEnabled(bool) (bool, error) { return true, nil }
+
+func (probePassword) ResetPassword(string, string, string) error {
+	return userauthhttp.ErrUserNotFound
+}
+
+func (probePassword) ChangePassword(uint, string, string) error { return nil }
+
+func postAccountProbe(router http.Handler, ip, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":1000"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
 func sameGenericLockout(a, b *httptest.ResponseRecorder) bool {
 	_, msgA := mustDecodeAPI(a)
 	_, msgB := mustDecodeAPI(b)
