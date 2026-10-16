@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/dujiao-next/internal/constants"
@@ -222,7 +223,14 @@ type CORSConfig struct {
 }
 
 var (
-	defaultCORSAllowedOrigins = []string{"*"}
+	// 生产店面与本地两个 SPA 的开发源。携带凭证时不得使用 "*"。
+	defaultCORSAllowedOrigins = []string{
+		"https://ai.luudan.xyz",
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://localhost:5174",
+		"http://127.0.0.1:5174",
+	}
 	defaultCORSAllowedMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodPatch}
 	defaultCORSAllowedHeaders = []string{
 		"Content-Type",
@@ -448,6 +456,27 @@ func Load() *Config {
 		logger.Errorw("config_unmarshal_failed", "error", err)
 		panic(fmt.Errorf("配置解析失败: %w", err))
 	}
+	if origins := splitCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); len(origins) > 0 {
+		cfg.CORS.AllowedOrigins = origins
+	}
 
 	return &cfg
+}
+
+// splitCORSOrigins 解析逗号分隔的 Origin 列表。空字符串返回 nil。
+func splitCORSOrigins(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.ContainsAny(part, "\r\n") {
+			continue
+		}
+		origins = append(origins, part)
+	}
+	return origins
 }

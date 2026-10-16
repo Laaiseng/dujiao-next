@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	userdomain "github.com/dujiao-next/internal/modules/identity/user/domain"
+	userauthhttp "github.com/dujiao-next/internal/modules/identity/userauth/transport/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -197,4 +202,223 @@ func TestToInt64(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestKeyByIPAndAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	emailReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":" User@Example.com ","password":"x","username":"other"}`))
+	emailReq.RemoteAddr = "203.0.113.8:1000"
+	emailCtx := newRateLimitContext(emailReq)
+	if got := KeyByIPAndAccount(emailCtx); got != "user@example.com|203.0.113.8" {
+		t.Fatalf("email key = %q", got)
+	}
+	body, err := io.ReadAll(emailCtx.Request.Body)
+	if err != nil || !strings.Contains(string(body), "User@Example.com") {
+		t.Fatalf("login body should stay readable, err=%v body=%s", err, body)
+	}
+
+	userReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":" Admin "}`))
+	userReq.RemoteAddr = "203.0.113.9:1000"
+	if got := KeyByIPAndAccount(newRateLimitContext(userReq)); got != "admin|203.0.113.9" {
+		t.Fatalf("username key = %q", got)
+	}
+}
+
+func TestUserLoginRateLimitRejectsCorrectPasswordUntilWindowRecovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth := &loginAuthStub{password: "correct-password"}
+	router := newUserLoginRouter(RateLimitRule{
+		Prefix:         "test:user_login:lock",
+		WindowSeconds:  30,
+		MaxRequests:    5,
+		BlockSeconds:   2,
+		MessageKey:     "error.login_too_many",
+		ResetOnSuccess: true,
+	}, auth)
+
+	const (
+		ip    = "203.0.113.10"
+		email = "shopper@example.com"
+	)
+	for i := 0; i < 5; i++ {
+		rec := postUserLogin(router, ip, email, "wrong-password")
+		code, msg := decodeAPI(t, rec)
+		if rec.Code != http.StatusOK || code != 401 {
+			t.Fatalf("failure %d status/code = %d/%d body=%s", i+1, rec.Code, code, rec.Body.String())
+		}
+		if strings.Contains(msg, email) {
+			t.Fatalf("failure message leaked the account: %s", msg)
+		}
+	}
+	if auth.calls != 5 {
+		t.Fatalf("auth calls after 5 failures = %d", auth.calls)
+	}
+
+	lockedCorrect := postUserLogin(router, ip, email, "correct-password")
+	lockedWrong := postUserLogin(router, ip, email, "still-wrong")
+	assertUniformLoginLockout(t, lockedCorrect, email)
+	assertUniformLoginLockout(t, lockedWrong, email)
+	if lockedCorrect.Body.String() != lockedWrong.Body.String() && !sameGenericLockout(lockedCorrect, lockedWrong) {
+		t.Fatalf("locked responses diverged:\ncorrect=%s\nwrong=%s", lockedCorrect.Body.String(), lockedWrong.Body.String())
+	}
+	if auth.calls != 5 {
+		t.Fatalf("locked requests must not check the password, calls=%d", auth.calls)
+	}
+
+	otherAccount := postUserLogin(router, ip, "other@example.com", "wrong-password")
+	if code, _ := decodeAPI(t, otherAccount); otherAccount.Code != http.StatusOK || code != 401 {
+		t.Fatalf("another account must keep its own counter, status=%d body=%s", otherAccount.Code, otherAccount.Body.String())
+	}
+	otherIP := postUserLogin(router, "203.0.113.11", email, "wrong-password")
+	if code, _ := decodeAPI(t, otherIP); otherIP.Code != http.StatusOK || code != 401 {
+		t.Fatalf("another IP must keep its own counter, status=%d body=%s", otherIP.Code, otherIP.Body.String())
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	var recovered *httptest.ResponseRecorder
+	for {
+		rec := postUserLogin(router, ip, email, "correct-password")
+		code, _ := decodeAPI(t, rec)
+		if rec.Code == http.StatusOK && code == 0 {
+			recovered = rec
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("correct password stayed rejected after the block window, last status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !strings.Contains(recovered.Body.String(), "ok-token") {
+		t.Fatalf("recovered login body = %s", recovered.Body.String())
+	}
+	if auth.calls != 8 {
+		t.Fatalf("auth calls = %d, want 5 failures + other account + other IP + recovered success", auth.calls)
+	}
+}
+
+func TestUserLoginSuccessClearsRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth := &loginAuthStub{password: "correct-password"}
+	router := newUserLoginRouter(RateLimitRule{
+		Prefix:         "test:user_login:clear",
+		WindowSeconds:  30,
+		MaxRequests:    5,
+		BlockSeconds:   30,
+		MessageKey:     "error.login_too_many",
+		ResetOnSuccess: true,
+	}, auth)
+
+	for i := 0; i < 4; i++ {
+		rec := postUserLogin(router, "203.0.113.20", "clear@example.com", "wrong-password")
+		code, _ := decodeAPI(t, rec)
+		if rec.Code != http.StatusOK || code != 401 {
+			t.Fatalf("failure %d body=%s", i+1, rec.Body.String())
+		}
+	}
+	success := postUserLogin(router, "203.0.113.20", "clear@example.com", "correct-password")
+	if code, _ := decodeAPI(t, success); success.Code != http.StatusOK || code != 0 {
+		t.Fatalf("success body=%s", success.Body.String())
+	}
+	calls := auth.calls
+	again := postUserLogin(router, "203.0.113.20", "clear@example.com", "wrong-password")
+	code, msg := decodeAPI(t, again)
+	if again.Code != http.StatusOK || code != 401 {
+		t.Fatalf("failure after success should be counted fresh, status=%d code=%d msg=%s", again.Code, code, msg)
+	}
+	if auth.calls != calls+1 {
+		t.Fatalf("auth calls after cleared failure = %d, want %d", auth.calls, calls+1)
+	}
+}
+
+type loginSettingsStub struct{}
+
+func (loginSettingsStub) GetRegistrationEnabled(bool) (bool, error) { return true, nil }
+
+func (loginSettingsStub) GetEmailVerificationEnabled(bool) (bool, error) { return false, nil }
+
+type loginAuthStub struct {
+	password string
+	calls    int
+}
+
+func (s *loginAuthStub) Register(context.Context, string, string, string, string, bool, bool) (*userdomain.User, string, time.Time, error) {
+	return nil, "", time.Time{}, context.Canceled
+}
+
+func (s *loginAuthStub) LoginStep1(_ context.Context, email, password string, _ bool) (*userauthhttp.AuthLoginResult, error) {
+	s.calls++
+	if password != s.password {
+		return nil, userauthhttp.ErrInvalidCredentials
+	}
+	return &userauthhttp.AuthLoginResult{
+		User:      &userdomain.User{ID: 1, Email: email, DisplayName: "tester"},
+		Token:     "ok-token",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}, nil
+}
+
+func newUserLoginRouter(rule RateLimitRule, auth *loginAuthStub) *gin.Engine {
+	handler := userauthhttp.NewUserLoginHandler(loginSettingsStub{}, auth, nil, nil)
+	router := gin.New()
+	router.POST("/api/v1/auth/login", RateLimitMiddleware(nil, rule, KeyByIPAndAccount), handler.UserLogin)
+	return router
+}
+
+func newRateLimitContext(req *http.Request) *gin.Context {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	return c
+}
+
+func postUserLogin(router http.Handler, ip, email, password string) *httptest.ResponseRecorder {
+	body := fmt.Sprintf(`{"email":%q,"password":%q}`, email, password)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":1000"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeAPI(t *testing.T, rec *httptest.ResponseRecorder) (int, string) {
+	t.Helper()
+	var payload struct {
+		StatusCode int    `json:"status_code"`
+		Msg        string `json:"msg"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	return payload.StatusCode, payload.Msg
+}
+
+func assertUniformLoginLockout(t *testing.T, rec *httptest.ResponseRecorder, email string) {
+	t.Helper()
+	code, msg := decodeAPI(t, rec)
+	if rec.Code != http.StatusTooManyRequests || code != 429 {
+		t.Fatalf("lockout status/code = %d/%d body=%s", rec.Code, code, rec.Body.String())
+	}
+	if !strings.Contains(msg, "登录尝试过多") {
+		t.Fatalf("lockout message = %q", msg)
+	}
+	if strings.Contains(rec.Body.String(), email) || strings.Contains(msg, "邮箱或密码错误") {
+		t.Fatalf("lockout response is not generic: %s", rec.Body.String())
+	}
+}
+
+func sameGenericLockout(a, b *httptest.ResponseRecorder) bool {
+	_, msgA := mustDecodeAPI(a)
+	_, msgB := mustDecodeAPI(b)
+	return strings.Contains(msgA, "登录尝试过多") && strings.Contains(msgB, "登录尝试过多")
+}
+
+func mustDecodeAPI(rec *httptest.ResponseRecorder) (int, string) {
+	var payload struct {
+		StatusCode int    `json:"status_code"`
+		Msg        string `json:"msg"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+	return payload.StatusCode, payload.Msg
 }

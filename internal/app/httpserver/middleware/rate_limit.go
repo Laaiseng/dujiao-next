@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,9 @@ type RateLimitRule struct {
 	MaxRequests   int
 	BlockSeconds  int
 	MessageKey    string
+	// ResetOnSuccess 在业务成功（HTTP 200 且 status_code=0）后删除计数。
+	// 登录接口用来实现“失败累计、成功清零”；超限请求在进入处理函数前就被拒绝。
+	ResetOnSuccess bool
 }
 
 var rateLimitScript = redis.NewScript(`
@@ -104,6 +108,15 @@ func (l *localRateLimiter) increment(key string, rule RateLimitRule, now time.Ti
 	return entry.count, ttl, false
 }
 
+func (l *localRateLimiter) delete(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.entries == nil {
+		return
+	}
+	delete(l.entries, key)
+}
+
 func (l *localRateLimiter) shouldWarnRedisFallback(now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -139,6 +152,7 @@ func RateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFunc RateL
 		}
 
 		var count, ttlSeconds int64
+		countedInRedis := false
 		now := time.Now()
 		incrementLocal := func() {
 			var capacityWarning bool
@@ -192,6 +206,7 @@ func RateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFunc RateL
 						incrementLocal()
 					} else {
 						ttlSeconds, _ = toInt64(values[1])
+						countedInRedis = true
 					}
 				}
 			}
@@ -218,8 +233,71 @@ func RateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFunc RateL
 			return
 		}
 
+		if !rule.ResetOnSuccess {
+			c.Next()
+			return
+		}
+		capture := &limitedBodyWriter{ResponseWriter: c.Writer}
+		c.Writer = capture
 		c.Next()
+		if isBusinessSuccess(capture) {
+			clearRateLimitKey(client, local, c, key, countedInRedis)
+		}
 	}
+}
+
+func clearRateLimitKey(client *redis.Client, local *localRateLimiter, c *gin.Context, key string, countedInRedis bool) {
+	if local != nil {
+		local.delete(key)
+	}
+	if !countedInRedis || client == nil || c == nil || c.Request == nil {
+		return
+	}
+	if err := client.Del(c.Request.Context(), key).Err(); err != nil && err != redis.Nil {
+		logger.Warnw("rate_limit_reset_failed", "error", err)
+	}
+}
+
+const rateLimitSuccessBodyLimit = 1 << 16
+
+// limitedBodyWriter 复制一小段响应体，用来识别登录是否业务成功。
+type limitedBodyWriter struct {
+	gin.ResponseWriter
+	body bytes.Buffer
+}
+
+func (w *limitedBodyWriter) Write(b []byte) (int, error) {
+	w.capture(b)
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *limitedBodyWriter) WriteString(s string) (int, error) {
+	w.capture([]byte(s))
+	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *limitedBodyWriter) capture(b []byte) {
+	if w.body.Len() >= rateLimitSuccessBodyLimit {
+		return
+	}
+	remain := rateLimitSuccessBodyLimit - w.body.Len()
+	if len(b) > remain {
+		b = b[:remain]
+	}
+	_, _ = w.body.Write(b)
+}
+
+func isBusinessSuccess(w *limitedBodyWriter) bool {
+	if w == nil || !w.Written() || w.Status() != http.StatusOK {
+		return false
+	}
+	var payload struct {
+		StatusCode int `json:"status_code"`
+	}
+	if err := json.Unmarshal(w.body.Bytes(), &payload); err != nil {
+		return false
+	}
+	return payload.StatusCode == 0
 }
 
 func isChannelAPIRequest(c *gin.Context) bool {
@@ -269,39 +347,79 @@ func KeyByUpstreamApiKey(c *gin.Context) string {
 
 // KeyByIPAndJSONField 使用 IP + JSON 字段作为限流 key
 func KeyByIPAndJSONField(field string) RateLimitKeyFunc {
+	return KeyByIPAndJSONFields(field)
+}
+
+// KeyByIPAndJSONFields 依次读取 JSON 字符串字段，用第一个非空值与 IP 组成限流 key。
+func KeyByIPAndJSONFields(fields ...string) RateLimitKeyFunc {
 	return func(c *gin.Context) string {
-		value := strings.ToLower(strings.TrimSpace(readJSONField(c, field)))
-		if value == "" {
-			return c.ClientIP()
+		if c == nil {
+			return ""
 		}
-		return fmt.Sprintf("%s|%s", value, c.ClientIP())
+		values := readJSONStringFields(c, fields...)
+		account := ""
+		for _, field := range fields {
+			account = strings.ToLower(strings.TrimSpace(values[field]))
+			if account != "" {
+				break
+			}
+		}
+		return joinAccountAndIP(account, c.ClientIP())
 	}
 }
 
-func readJSONField(c *gin.Context, field string) string {
-	if c == nil || c.Request == nil || c.Request.Body == nil {
+// KeyByIPAndAccount 使用 IP + 登录账号（email / username / account）作为限流 key。
+// 账号会转成小写并截断，避免同一账号用大小写或超长字段绕过计数。
+func KeyByIPAndAccount(c *gin.Context) string {
+	if c == nil {
 		return ""
+	}
+	return KeyByIPAndJSONFields("email", "username", "account")(c)
+}
+
+func joinAccountAndIP(account, ip string) string {
+	if len(account) > 254 {
+		account = account[:254]
+	}
+	if account == "" {
+		return ip
+	}
+	return account + "|" + ip
+}
+
+func readJSONField(c *gin.Context, field string) string {
+	return readJSONStringFields(c, field)[field]
+}
+
+func readJSONStringFields(c *gin.Context, fields ...string) map[string]string {
+	found := make(map[string]string, len(fields))
+	if c == nil || c.Request == nil || c.Request.Body == nil || len(fields) == 0 {
+		return found
 	}
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		return ""
+		return found
 	}
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 	if len(body) == 0 {
-		return ""
+		return found
 	}
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
+		return found
 	}
-	value, ok := payload[field]
-	if !ok {
-		return ""
+	for _, field := range fields {
+		value, ok := payload[field]
+		if !ok {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		found[field] = strings.TrimSpace(text)
 	}
-	if text, ok := value.(string); ok {
-		return strings.TrimSpace(text)
-	}
-	return ""
+	return found
 }
 
 func toInt64(value interface{}) (int64, bool) {

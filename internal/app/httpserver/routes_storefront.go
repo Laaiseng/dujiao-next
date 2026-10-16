@@ -116,7 +116,11 @@ func registerStorefrontRoutes(
 	{
 		userauthtransport.RegisterUserVerifyAuthRoutes(auth, userVerifyHandler, authRateLimit)
 		userauthtransport.RegisterUserRegisterAuthRoutes(auth, userLoginHandler, authRateLimit)
-		userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIPAndJSONField("email")))
+		// 前台登录与后台登录共用 security.login_rate_limit（默认 5 次失败后封禁 block_seconds，通常 900 秒）。
+		// 计数键是 IP + 账号。成功响应清零；超过上限后窗口恢复前直接 429，不再校验密码。
+		userLoginRule := loginRule
+		userLoginRule.ResetOnSuccess = true
+		userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddleware(redisClient, userLoginRule, middleware.KeyByIPAndAccount))
 		userauthtransport.RegisterUser2FAAuthRoutes(auth, user2FAHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserTelegramAuthRoutes(auth, userTelegramHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserTelegramOIDCAuthRoutes(auth, userTelegramOIDCHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))

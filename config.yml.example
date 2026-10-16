@@ -111,8 +111,15 @@ upload:
   max_height: 4096
 
 cors:
+  # 固定 Origin 白名单。allow_credentials 为 true 时会忽略 "*"，
+  # 并且不会把请求头里的 Origin 反射回去。生产店面域名写在这里，
+  # 也可以用环境变量 CORS_ALLOWED_ORIGINS（逗号分隔）覆盖本列表。
   allowed_origins:
-    - "*"
+    - https://ai.luudan.xyz
+    - http://localhost:5173
+    - http://127.0.0.1:5173
+    - http://localhost:5174
+    - http://127.0.0.1:5174
   allowed_methods:
     - GET
     - POST
