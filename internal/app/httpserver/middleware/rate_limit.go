@@ -133,104 +133,48 @@ func (l *localRateLimiter) shouldWarnRedisFallback(now time.Time) bool {
 // 多实例部署必须配置共享 Redis 才能获得全局一致的计数。Redis 故障降级和
 // 本地容量耗尽都会输出节流后的 warning，避免故障期间产生日志洪泛。
 func RateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFunc RateLimitKeyFunc) gin.HandlerFunc {
+	return rateLimitMiddleware(client, rule, keyFunc)
+}
+
+// RateLimitMiddlewareKeys 用同一窗口、次数和封禁对多个 key 分别计数。
+// 任一 key 超限即返回 429。同一次请求计算出相同存储 key 时只计一次。
+func RateLimitMiddlewareKeys(client *redis.Client, rule RateLimitRule, keyFuncs ...RateLimitKeyFunc) gin.HandlerFunc {
+	if len(keyFuncs) == 0 {
+		keyFuncs = []RateLimitKeyFunc{KeyByIP}
+	}
+	return rateLimitMiddleware(client, rule, keyFuncs...)
+}
+
+type rateLimitCount struct {
+	key            string
+	count          int64
+	ttlSeconds     int64
+	countedInRedis bool
+}
+
+func rateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFuncs ...RateLimitKeyFunc) gin.HandlerFunc {
 	local := &localRateLimiter{}
 	return func(c *gin.Context) {
-		if rule.WindowSeconds <= 0 || rule.MaxRequests <= 0 {
+		if rule.WindowSeconds <= 0 || rule.MaxRequests <= 0 || len(keyFuncs) == 0 {
 			c.Next()
 			return
 		}
 
-		key := ""
-		if keyFunc != nil {
-			key = strings.TrimSpace(keyFunc(c))
-		}
-		if key == "" {
-			key = c.ClientIP()
-		}
-		if rule.Prefix != "" {
-			key = fmt.Sprintf("%s:%s", rule.Prefix, key)
-		}
-
-		var count, ttlSeconds int64
-		countedInRedis := false
 		now := time.Now()
-		incrementLocal := func() {
-			var capacityWarning bool
-			count, ttlSeconds, capacityWarning = local.increment(key, rule, now)
-			if capacityWarning {
-				logger.Warnw(
-					"rate_limit_local_capacity_exhausted",
-					"prefix", rule.Prefix,
-					"max_entries", localRateLimitMaxEntries,
-					"window_seconds", rule.WindowSeconds,
-				)
+		seen := make(map[string]struct{}, len(keyFuncs))
+		counted := make([]rateLimitCount, 0, len(keyFuncs))
+		for _, keyFunc := range keyFuncs {
+			key := rateLimitStorageKey(c, rule, keyFunc)
+			if _, ok := seen[key]; ok {
+				continue
 			}
-		}
-		if client == nil {
-			incrementLocal()
-		} else {
-			result, err := rateLimitScript.Run(
-				c.Request.Context(),
-				client,
-				[]string{key},
-				rule.WindowSeconds,
-				rule.MaxRequests,
-				rule.BlockSeconds,
-			).Result()
-			if err != nil {
-				if local.shouldWarnRedisFallback(now) {
-					logger.Warnw("rate_limit_redis_fallback", "prefix", rule.Prefix, "error", err)
-				}
-				incrementLocal()
-			} else {
-				values, ok := result.([]interface{})
-				if !ok || len(values) < 2 {
-					if local.shouldWarnRedisFallback(now) {
-						logger.Warnw(
-							"rate_limit_redis_fallback",
-							"prefix", rule.Prefix,
-							"error", fmt.Sprintf("unexpected result shape %T", result),
-						)
-					}
-					incrementLocal()
-				} else {
-					count, ok = toInt64(values[0])
-					if !ok {
-						if local.shouldWarnRedisFallback(now) {
-							logger.Warnw(
-								"rate_limit_redis_fallback",
-								"prefix", rule.Prefix,
-								"error", fmt.Sprintf("invalid count type %T", values[0]),
-							)
-						}
-						incrementLocal()
-					} else {
-						ttlSeconds, _ = toInt64(values[1])
-						countedInRedis = true
-					}
-				}
+			seen[key] = struct{}{}
+			hit := acquireRateLimit(c, client, local, rule, key, now)
+			counted = append(counted, hit)
+			if hit.count > int64(rule.MaxRequests) {
+				rejectRateLimited(c, rule, hit.ttlSeconds)
+				return
 			}
-		}
-		if count > int64(rule.MaxRequests) {
-			waitSeconds := int(ttlSeconds)
-			if waitSeconds < 1 {
-				waitSeconds = rule.WindowSeconds
-			}
-			if waitSeconds < 1 {
-				waitSeconds = 1
-			}
-			msgKey := strings.TrimSpace(rule.MessageKey)
-			if msgKey == "" {
-				msgKey = "error.rate_limited"
-			}
-			msg := i18n.Sprintf(i18n.ResolveLocale(c), msgKey, waitSeconds)
-			if isChannelAPIRequest(c) {
-				response.ChannelError(c, 429, response.CodeTooManyRequests, msg, "rate_limit_exceeded")
-			} else {
-				response.ErrorWithHTTPStatus(c, 429, response.CodeTooManyRequests, msg)
-			}
-			c.Abort()
-			return
 		}
 
 		if !rule.ResetOnSuccess {
@@ -240,10 +184,111 @@ func RateLimitMiddleware(client *redis.Client, rule RateLimitRule, keyFunc RateL
 		capture := &limitedBodyWriter{ResponseWriter: c.Writer}
 		c.Writer = capture
 		c.Next()
-		if isBusinessSuccess(capture) {
-			clearRateLimitKey(client, local, c, key, countedInRedis)
+		if !isBusinessSuccess(capture) {
+			return
+		}
+		for _, hit := range counted {
+			clearRateLimitKey(client, local, c, hit.key, hit.countedInRedis)
 		}
 	}
+}
+
+func rateLimitStorageKey(c *gin.Context, rule RateLimitRule, keyFunc RateLimitKeyFunc) string {
+	key := ""
+	if keyFunc != nil {
+		key = strings.TrimSpace(keyFunc(c))
+	}
+	if key == "" {
+		key = c.ClientIP()
+	}
+	if rule.Prefix != "" {
+		key = fmt.Sprintf("%s:%s", rule.Prefix, key)
+	}
+	return key
+}
+
+func acquireRateLimit(c *gin.Context, client *redis.Client, local *localRateLimiter, rule RateLimitRule, key string, now time.Time) rateLimitCount {
+	hit := rateLimitCount{key: key}
+	incrementLocal := func() {
+		var capacityWarning bool
+		hit.count, hit.ttlSeconds, capacityWarning = local.increment(key, rule, now)
+		hit.countedInRedis = false
+		if capacityWarning {
+			logger.Warnw(
+				"rate_limit_local_capacity_exhausted",
+				"prefix", rule.Prefix,
+				"max_entries", localRateLimitMaxEntries,
+				"window_seconds", rule.WindowSeconds,
+			)
+		}
+	}
+	if client == nil {
+		incrementLocal()
+		return hit
+	}
+	result, err := rateLimitScript.Run(
+		c.Request.Context(),
+		client,
+		[]string{key},
+		rule.WindowSeconds,
+		rule.MaxRequests,
+		rule.BlockSeconds,
+	).Result()
+	if err != nil {
+		if local.shouldWarnRedisFallback(now) {
+			logger.Warnw("rate_limit_redis_fallback", "prefix", rule.Prefix, "error", err)
+		}
+		incrementLocal()
+		return hit
+	}
+	values, ok := result.([]interface{})
+	if !ok || len(values) < 2 {
+		if local.shouldWarnRedisFallback(now) {
+			logger.Warnw(
+				"rate_limit_redis_fallback",
+				"prefix", rule.Prefix,
+				"error", fmt.Sprintf("unexpected result shape %T", result),
+			)
+		}
+		incrementLocal()
+		return hit
+	}
+	hit.count, ok = toInt64(values[0])
+	if !ok {
+		if local.shouldWarnRedisFallback(now) {
+			logger.Warnw(
+				"rate_limit_redis_fallback",
+				"prefix", rule.Prefix,
+				"error", fmt.Sprintf("invalid count type %T", values[0]),
+			)
+		}
+		incrementLocal()
+		return hit
+	}
+	hit.ttlSeconds, _ = toInt64(values[1])
+	hit.countedInRedis = true
+	return hit
+}
+
+func rejectRateLimited(c *gin.Context, rule RateLimitRule, ttlSeconds int64) {
+	waitSeconds := int(ttlSeconds)
+	if waitSeconds < 1 {
+		waitSeconds = rule.WindowSeconds
+	}
+	if waitSeconds < 1 {
+		waitSeconds = 1
+	}
+	msgKey := strings.TrimSpace(rule.MessageKey)
+	if msgKey == "" {
+		msgKey = "error.rate_limited"
+	}
+	msg := i18n.Sprintf(i18n.ResolveLocale(c), msgKey, waitSeconds)
+	if isChannelAPIRequest(c) {
+		response.ChannelError(c, 429, response.CodeTooManyRequests, msg, "rate_limit_exceeded")
+	} else {
+		response.ErrorWithHTTPStatus(c, 429, response.CodeTooManyRequests, msg)
+	}
+	c.Abort()
 }
 
 func clearRateLimitKey(client *redis.Client, local *localRateLimiter, c *gin.Context, key string, countedInRedis bool) {

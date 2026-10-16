@@ -100,7 +100,7 @@ func registerStorefrontRoutes(
 		paymenttransport.RegisterGuestWriteRoutes(guestWrite, paymentWriteHandler)
 	}
 
-	// 注册 / 忘记密码 / 发送验证码：按 IP 计数，共享出口 IP（NAT）下一次完整流程就要 2~4 次请求，
+	// 注册按 IP 计数。共享出口 IP（NAT）下一次完整流程就要 2~4 次请求，
 	// 不能照搬登录的 5 次/封 15 分钟，否则同网用户会被成批误封。
 	authRule := middleware.RateLimitRule{
 		Prefix:        loginRule.Prefix + ":auth",
@@ -110,11 +110,27 @@ func registerStorefrontRoutes(
 		MessageKey:    "error.rate_limited",
 	}
 	authRateLimit := middleware.RateLimitMiddleware(redisClient, authRule, middleware.KeyByIP)
+	// 发送验证码 / 忘记密码会暴露账号是否存在。套用 security.login_rate_limit
+	// 的窗口、次数和封禁，并同时按 IP 与「邮箱+IP」计数。成功响应也计入次数，
+	// 更换邮箱不能重置同一 IP 的批量探测上限。
+	accountProbeRule := middleware.RateLimitRule{
+		Prefix:        loginRule.Prefix + ":account_probe",
+		WindowSeconds: loginRule.WindowSeconds,
+		MaxRequests:   loginRule.MaxRequests,
+		BlockSeconds:  loginRule.BlockSeconds,
+		MessageKey:    "error.rate_limited",
+	}
+	accountProbeLimit := middleware.RateLimitMiddlewareKeys(
+		redisClient,
+		accountProbeRule,
+		middleware.KeyByIP,
+		middleware.KeyByIPAndJSONField("email"),
+	)
 
 	// 用户认证接口
 	auth := storefront.Group("/auth")
 	{
-		userauthtransport.RegisterUserVerifyAuthRoutes(auth, userVerifyHandler, authRateLimit)
+		userauthtransport.RegisterUserVerifyAuthRoutes(auth, userVerifyHandler, accountProbeLimit)
 		userauthtransport.RegisterUserRegisterAuthRoutes(auth, userLoginHandler, authRateLimit)
 		// 前台登录与后台登录共用 security.login_rate_limit（默认 5 次失败后封禁 block_seconds，通常 900 秒）。
 		// 计数键是 IP + 账号。成功响应清零；超过上限后窗口恢复前直接 429，不再校验密码。
@@ -126,7 +142,7 @@ func registerStorefrontRoutes(
 		userauthtransport.RegisterUserTelegramOIDCAuthRoutes(auth, userTelegramOIDCHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserGoogleAuthRoutes(auth, userGoogleHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserInviteAuthRoutes(auth, userInviteHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
-		userauthtransport.RegisterUserPasswordAuthRoutes(auth, userPasswordHandler, authRateLimit)
+		userauthtransport.RegisterUserPasswordAuthRoutes(auth, userPasswordHandler, accountProbeLimit)
 	}
 
 	// 用户接口（需鉴权）

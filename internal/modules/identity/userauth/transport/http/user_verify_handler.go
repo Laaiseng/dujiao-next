@@ -110,6 +110,10 @@ func (h *UserVerifyHandler) SendUserVerifyCode(c *gin.Context) {
 
 	locale := i18n.ResolveLocale(c)
 	if err := h.auth.SendVerifyCode(c.Request.Context(), req.Email, req.Purpose, locale, req.InviteCode); err != nil {
+		if accountBoundVerifyPurpose(purpose) && errors.Is(err, ErrUserNotFound) {
+			respondAccountVerifyCodeAccepted(c)
+			return
+		}
 		if respondInviteCodeError(c, err) {
 			return
 		}
@@ -137,7 +141,24 @@ func (h *UserVerifyHandler) SendUserVerifyCode(c *gin.Context) {
 		return
 	}
 
+	if accountBoundVerifyPurpose(purpose) {
+		respondAccountVerifyCodeAccepted(c)
+		return
+	}
 	response.Success(c, gin.H{"sent": true})
+}
+
+func accountBoundVerifyPurpose(purpose string) bool {
+	switch purpose {
+	case constants.VerifyPurposeReset, constants.VerifyPurposeTelegramBind:
+		return true
+	default:
+		return false
+	}
+}
+
+func respondAccountVerifyCodeAccepted(c *gin.Context) {
+	response.SuccessWithMsg(c, i18n.T(i18n.ResolveLocale(c), "success.verify_code_if_account_exists"), gin.H{"sent": true})
 }
 
 func respondCaptchaError(c *gin.Context, err error) {

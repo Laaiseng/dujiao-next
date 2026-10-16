@@ -28,12 +28,12 @@ func (s *Service) ResetPassword(email, code, newPassword string) error {
 	if err != nil {
 		return err
 	}
-	if user == nil {
-		return ErrNotFound
-	}
-
+	// 无论邮箱是否注册都先校验验证码，使「用户不存在」和「验证码错误」对外相同。
 	if _, err := s.verifyCode(normalized, constants.VerifyPurposeReset, code); err != nil {
 		return err
+	}
+	if user == nil {
+		return ErrVerifyCodeInvalid
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

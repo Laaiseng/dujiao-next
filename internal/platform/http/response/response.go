@@ -2,6 +2,7 @@ package response
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -69,6 +70,18 @@ func Success(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, Response{
 		StatusCode: 0,
 		Msg:        responseMsgSuccess,
+		Data:       data,
+	})
+}
+
+// SuccessWithMsg 成功响应，使用调用方给出的提示。空消息回退为 success。
+func SuccessWithMsg(c *gin.Context, msg string, data interface{}) {
+	if strings.TrimSpace(msg) == "" {
+		msg = responseMsgSuccess
+	}
+	c.JSON(http.StatusOK, Response{
+		StatusCode: CodeOK,
+		Msg:        msg,
 		Data:       data,
 	})
 }
