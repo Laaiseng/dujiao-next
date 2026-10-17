@@ -267,8 +267,9 @@ func TestUserLoginRateLimitRejectsCorrectPasswordUntilWindowRecovers(t *testing.
 	}
 
 	otherAccount := postUserLogin(router, ip, "other@example.com", "wrong-password")
-	if code, _ := decodeAPI(t, otherAccount); otherAccount.Code != http.StatusOK || code != 401 {
-		t.Fatalf("another account must keep its own counter, status=%d body=%s", otherAccount.Code, otherAccount.Body.String())
+	assertUniformLoginLockout(t, otherAccount, "other@example.com")
+	if auth.calls != 5 {
+		t.Fatalf("rotating the email on a locked IP must not check the password, calls=%d", auth.calls)
 	}
 	otherIP := postUserLogin(router, "203.0.113.11", email, "wrong-password")
 	if code, _ := decodeAPI(t, otherIP); otherIP.Code != http.StatusOK || code != 401 {
@@ -292,8 +293,90 @@ func TestUserLoginRateLimitRejectsCorrectPasswordUntilWindowRecovers(t *testing.
 	if !strings.Contains(recovered.Body.String(), "ok-token") {
 		t.Fatalf("recovered login body = %s", recovered.Body.String())
 	}
-	if auth.calls != 8 {
-		t.Fatalf("auth calls = %d, want 5 failures + other account + other IP + recovered success", auth.calls)
+	if auth.calls != 7 {
+		t.Fatalf("auth calls = %d, want 5 failures + other IP + recovered success", auth.calls)
+	}
+}
+
+func TestUserLoginRotatingEmailsHitIPAggregate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth := &loginAuthStub{password: "correct-password"}
+	router := newUserLoginRouter(RateLimitRule{
+		Prefix:         "test:user_login:rotate",
+		WindowSeconds:  300,
+		MaxRequests:    5,
+		BlockSeconds:   900,
+		MessageKey:     "error.login_too_many",
+		ResetOnSuccess: true,
+	}, auth)
+
+	const ip = "203.0.113.30"
+	for i := 1; i <= 5; i++ {
+		email := fmt.Sprintf("brute%d@example.com", i)
+		rec := postUserLogin(router, ip, email, "wrong-password")
+		code, msg := decodeAPI(t, rec)
+		if rec.Code != http.StatusOK || code != 401 {
+			t.Fatalf("email %d status/code = %d/%d body=%s", i, rec.Code, code, rec.Body.String())
+		}
+		if strings.Contains(msg, email) {
+			t.Fatalf("failure message leaked the account: %s", msg)
+		}
+	}
+	if auth.calls != 5 {
+		t.Fatalf("auth calls after 5 rotating emails = %d", auth.calls)
+	}
+
+	blocked := postUserLogin(router, ip, "brute6@example.com", "correct-password")
+	assertUniformLoginLockout(t, blocked, "brute6@example.com")
+	if auth.calls != 5 {
+		t.Fatalf("IP aggregate lock must skip the password check, calls=%d", auth.calls)
+	}
+
+	otherIP := postUserLogin(router, "203.0.113.31", "brute6@example.com", "wrong-password")
+	if code, _ := decodeAPI(t, otherIP); otherIP.Code != http.StatusOK || code != 401 {
+		t.Fatalf("another IP status=%d body=%s", otherIP.Code, otherIP.Body.String())
+	}
+	if auth.calls != 6 {
+		t.Fatalf("other IP auth calls = %d", auth.calls)
+	}
+}
+
+func TestUserLogin2FAChallengeClearsRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth := &loginAuthStub{password: "correct-password", requireTOTP: true}
+	router := newUserLoginRouter(RateLimitRule{
+		Prefix:         "test:user_login:totp",
+		WindowSeconds:  300,
+		MaxRequests:    5,
+		BlockSeconds:   900,
+		MessageKey:     "error.login_too_many",
+		ResetOnSuccess: true,
+	}, auth)
+
+	const (
+		ip    = "203.0.113.32"
+		email = "totp@example.com"
+	)
+	for i := 0; i < 4; i++ {
+		rec := postUserLogin(router, ip, email, "wrong-password")
+		code, _ := decodeAPI(t, rec)
+		if rec.Code != http.StatusOK || code != 401 {
+			t.Fatalf("failure %d body=%s", i+1, rec.Body.String())
+		}
+	}
+	challenge := postUserLogin(router, ip, email, "correct-password")
+	code, _ := decodeAPI(t, challenge)
+	if challenge.Code != http.StatusOK || code != 0 || !strings.Contains(challenge.Body.String(), `"requires_totp":true`) {
+		t.Fatalf("2FA challenge body=%s", challenge.Body.String())
+	}
+	calls := auth.calls
+	again := postUserLogin(router, ip, "other-after-totp@example.com", "wrong-password")
+	againCode, _ := decodeAPI(t, again)
+	if again.Code != http.StatusOK || againCode != 401 {
+		t.Fatalf("IP counter should clear when the password step returns a 2FA challenge, status=%d body=%s", again.Code, again.Body.String())
+	}
+	if auth.calls != calls+1 {
+		t.Fatalf("auth calls after cleared failure = %d, want %d", auth.calls, calls+1)
 	}
 }
 
@@ -338,8 +421,9 @@ func (loginSettingsStub) GetRegistrationEnabled(bool) (bool, error) { return tru
 func (loginSettingsStub) GetEmailVerificationEnabled(bool) (bool, error) { return false, nil }
 
 type loginAuthStub struct {
-	password string
-	calls    int
+	password    string
+	calls       int
+	requireTOTP bool
 }
 
 func (s *loginAuthStub) Register(context.Context, string, string, string, string, bool, bool) (*userdomain.User, string, time.Time, error) {
@@ -351,17 +435,28 @@ func (s *loginAuthStub) LoginStep1(_ context.Context, email, password string, _ 
 	if password != s.password {
 		return nil, userauthhttp.ErrInvalidCredentials
 	}
-	return &userauthhttp.AuthLoginResult{
+	result := &userauthhttp.AuthLoginResult{
 		User:      &userdomain.User{ID: 1, Email: email, DisplayName: "tester"},
 		Token:     "ok-token",
 		ExpiresAt: time.Now().Add(time.Hour),
-	}, nil
+	}
+	if s.requireTOTP {
+		result.RequiresTOTP = true
+		result.Token = ""
+		result.ChallengeToken = "challenge-token"
+		result.ChallengeExpiresAt = time.Now().Add(5 * time.Minute)
+	}
+	return result, nil
 }
 
 func newUserLoginRouter(rule RateLimitRule, auth *loginAuthStub) *gin.Engine {
 	handler := userauthhttp.NewUserLoginHandler(loginSettingsStub{}, auth, nil, nil)
 	router := gin.New()
-	router.POST("/api/v1/auth/login", RateLimitMiddleware(nil, rule, KeyByIPAndAccount), handler.UserLogin)
+	userauthhttp.RegisterUserLoginAuthRoutes(
+		router.Group("/api/v1/auth"),
+		handler,
+		RateLimitMiddlewareKeys(nil, rule, KeyByIP, KeyByIPAndAccount),
+	)
 	return router
 }
 

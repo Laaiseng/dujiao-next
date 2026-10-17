@@ -71,7 +71,12 @@ func TestRouteDomainFilesPreserveTrustBoundaries(t *testing.T) {
 				`middleware.RateLimitMiddlewareKeys(`,
 				`userauthtransport.RegisterUserRegisterAuthRoutes(auth, userLoginHandler, authRateLimit)`,
 				`userLoginRule.ResetOnSuccess = true`,
-				`userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddleware(redisClient, userLoginRule, middleware.KeyByIPAndAccount))`,
+				`userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddlewareKeys(
+			redisClient,
+			userLoginRule,
+			middleware.KeyByIP,
+			middleware.KeyByIPAndAccount,
+		))`,
 				`userauthtransport.RegisterUser2FAAuthRoutes(auth, user2FAHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))`,
 				`userauthtransport.RegisterUser2FARoutes(user, user2FAHandler)`,
 				`userauthtransport.RegisterUserTelegramAuthRoutes(auth, userTelegramHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))`,
