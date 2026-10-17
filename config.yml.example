@@ -139,6 +139,12 @@ cors:
   max_age: 600
 
 security:
+  # 后台登录按来源 IP 计数；前台 POST /api/v1/auth/login 用同一组数字，
+  # 同时按来源 IP（换邮箱也计入）和「邮箱 + IP」计数。
+  # 超过 max_attempts 返回 HTTP 429，且不再校验密码。
+  # 默认：300 秒内最多 5 次，然后封禁 900 秒。
+  # 可选纵深：后台验证码里把 login 场景打开（配置默认 captcha.scenes.login 为 false）。
+  # 验证码不能代替这里的限流。
   login_rate_limit:
     window_seconds: 300
     max_attempts: 5

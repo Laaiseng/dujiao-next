@@ -132,11 +132,20 @@ func registerStorefrontRoutes(
 	{
 		userauthtransport.RegisterUserVerifyAuthRoutes(auth, userVerifyHandler, accountProbeLimit)
 		userauthtransport.RegisterUserRegisterAuthRoutes(auth, userLoginHandler, authRateLimit)
-		// 前台登录与后台登录共用 security.login_rate_limit（默认 5 次失败后封禁 block_seconds，通常 900 秒）。
-		// 计数键是 IP + 账号。成功响应清零；超过上限后窗口恢复前直接 429，不再校验密码。
+		// 前台登录与后台登录共用 security.login_rate_limit（默认 300 秒内 5 次，封禁 900 秒）。
+		// 两个维度分开计数，任一超限直接 HTTP 429，不再校验密码：
+		//   - 来源 IP：换邮箱不能重置，用来挡住轮换邮箱的爆破；
+		//   - 账号|IP：同一账号在同一 IP 上的失败次数。
+		// 业务成功（HTTP 200 且 status_code=0，含 2FA challenge）清掉本次计入的计数器。
+		// 中间件缺失会在注册时 panic，不会静默放行。
 		userLoginRule := loginRule
 		userLoginRule.ResetOnSuccess = true
-		userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddleware(redisClient, userLoginRule, middleware.KeyByIPAndAccount))
+		userauthtransport.RegisterUserLoginAuthRoutes(auth, userLoginHandler, middleware.RateLimitMiddlewareKeys(
+			redisClient,
+			userLoginRule,
+			middleware.KeyByIP,
+			middleware.KeyByIPAndAccount,
+		))
 		userauthtransport.RegisterUser2FAAuthRoutes(auth, user2FAHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserTelegramAuthRoutes(auth, userTelegramHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
 		userauthtransport.RegisterUserTelegramOIDCAuthRoutes(auth, userTelegramOIDCHandler, middleware.RateLimitMiddleware(redisClient, loginRule, middleware.KeyByIP))
