@@ -160,12 +160,12 @@
           </div>
 
           <template v-if="!walletOnlyPayment">
-            <div v-if="requiresOnlineChannel && paymentChannels.length > 0" class="grid gap-2.5 sm:grid-cols-2">
+            <div v-if="requiresOnlineChannel && paymentChannels.length > 0" class="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-1">
               <button
                 v-for="channel in paymentChannels"
                 :key="channel.id"
                 type="button"
-                class="rounded-sm border-2 bg-card p-2.5 text-left"
+                class="min-w-0 rounded-sm border-2 bg-card p-2.5 text-left"
                 :class="[
                   selectedChannelId === channel.id && !isChannelDisabledForAmount(channel) ? 'border-primary bg-primary/10' : 'border-hairline-strong',
                   isChannelDisabledForAmount(channel) ? 'cursor-not-allowed opacity-55' : '',
@@ -174,9 +174,9 @@
                 :title="isChannelDisabledForAmount(channel) ? channelAmountLimitHint(channel) : ''"
                 @click="handleSelectChannel(channel)"
               >
-                <div class="flex items-center gap-2">
+                <div class="flex min-w-0 items-center gap-2">
                   <img v-if="channel.icon" :src="getImageUrl(channel.icon)" loading="lazy" class="h-5 w-5 flex-none rounded-[4px] object-contain" />
-                  <span class="truncate font-semibold text-foreground">{{ channel.name }}</span>
+                  <span class="min-w-0 break-words font-semibold text-foreground max-md:truncate">{{ channel.name }}</span>
                 </div>
                 <div v-if="channel.fee_policy === 'customer_surcharge'" class="mt-1.5 grid gap-0.5 text-[11.5px] text-warning">
                   <div>{{ t('payment.feeLabel') }}：{{ formatChannelFeeRate(channel) }}</div>
