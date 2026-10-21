@@ -29,6 +29,7 @@ import {
   SlidersHorizontal,
   ShieldCheck,
   ScrollText,
+  ShieldAlert,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -531,6 +532,12 @@ const navGroups = computed<NavGroup[]>(() => {
           to: '/authz-audit-logs',
           icon: ScrollText,
           permission: 'GET:/admin/authz/audit-logs',
+        },
+        {
+          label: t('admin.navItems.adminLoginLogs'),
+          to: '/admin-login-logs',
+          icon: ShieldAlert,
+          permission: 'GET:/admin/admin-login-logs',
         },
         {
           label: t('admin.navItems.security'),

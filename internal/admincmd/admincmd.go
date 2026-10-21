@@ -1,5 +1,5 @@
 // Package admincmd 提供 admin 子命令实现，作为运维工具集合：
-// 列出管理员、重置 2FA、重置密码。所有命令共享调用方初始化好的
+// 列出管理员、重置 2FA、重置密码、解除后台登录封禁。所有命令共享调用方初始化好的
 // gormdb.DB，无需重复 config.Load / InitDB。
 //
 // 入口由 cmd/server/main.go 在检测到 "admin" 子命令时调用 Run(args)，
@@ -11,16 +11,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/dujiao-next/internal/cache"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/dujiao-next/internal/app/adminloginguard"
+	"github.com/dujiao-next/internal/cache"
+	"github.com/dujiao-next/internal/config"
 	"github.com/dujiao-next/internal/constants"
 	auditlogapp "github.com/dujiao-next/internal/modules/auditlog/application"
 	auditloggormstore "github.com/dujiao-next/internal/modules/auditlog/infrastructure/gormstore"
 	adminstore "github.com/dujiao-next/internal/modules/identity/admin/infrastructure/gormstore"
+	settingsapp "github.com/dujiao-next/internal/modules/settings/application"
+	settingsstore "github.com/dujiao-next/internal/modules/settings/infrastructure/gormstore"
 	"github.com/dujiao-next/internal/platform/database/gormdb"
 
 	"github.com/google/uuid"
@@ -39,7 +43,10 @@ func Usage() {
   dujiao-api admin reset-2fa --username <name>            重置指定管理员的 2FA
   dujiao-api admin reset-password --username <name> [--password <new>]
                                                           重置管理员密码（超管忘记密码恢复用）
-                                                          不传 --password 时从 stdin 隐藏读入两次确认`)
+                                                          不传 --password 时从 stdin 隐藏读入两次确认
+  dujiao-api admin unban-login --ip <ip> [--fingerprint <hex>]
+                                                          解除后台登录封禁（临时 Redis 封禁 + 永久封禁）
+                                                          至少提供 --ip 或 --fingerprint 之一`)
 }
 
 // Run 分发 admin 子命令。args 是去掉 "admin" 之后的参数（os.Args[2:]）。
@@ -75,6 +82,15 @@ func Run(args []string) {
 			os.Exit(1)
 		}
 		resetPassword(username, password)
+	case "unban-login":
+		ip := parseStringFlag(rest, "ip")
+		fingerprint := parseStringFlag(rest, "fingerprint")
+		if strings.TrimSpace(ip) == "" && strings.TrimSpace(fingerprint) == "" {
+			fmt.Fprintln(os.Stderr, "missing --ip or --fingerprint")
+			Usage()
+			os.Exit(1)
+		}
+		unbanLogin(ip, fingerprint)
 	default:
 		Usage()
 		os.Exit(1)
@@ -194,6 +210,34 @@ func resetPassword(username, providedPassword string) {
 	})
 	fmt.Printf("OK: password reset for admin id=%d username=%s at %s\n", admin.ID, admin.Username, time.Now().Format(time.RFC3339))
 	fmt.Println("提示: 该管理员所有现有会话已强制下线，请用新密码重新登录。")
+}
+
+func unbanLogin(ip, fingerprint string) {
+	cfg := config.Load()
+	prefix := constants.RedisPrefixDefault
+	var whitelist []string
+	if cfg != nil {
+		if strings.TrimSpace(cfg.Redis.Prefix) != "" {
+			prefix = strings.TrimSpace(cfg.Redis.Prefix)
+		}
+		whitelist = cfg.Security.LoginGuard.IPWhitelist
+	}
+	guard := adminloginguard.New(adminloginguard.Options{
+		Redis:           cache.Client(),
+		Prefix:          prefix,
+		StaticWhitelist: whitelist,
+		Settings:        settingsapp.NewService(settingsstore.New(gormdb.DB)),
+		PolicyTTL:       -1,
+	})
+	result, err := guard.UnbanDetails(context.Background(), ip, fingerprint)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unban: %v\n", err)
+		os.Exit(1)
+	}
+	if result.RedisUnavailable {
+		fmt.Fprintln(os.Stderr, "警告: Redis 不可用。永久封禁已从数据库移除；若进程正在用内存兜底计数，需要重启服务后才会丢掉临时封禁。")
+	}
+	fmt.Printf("OK: unbanned ip=%q fingerprint=%q at %s\n", strings.TrimSpace(ip), strings.TrimSpace(fingerprint), time.Now().Format(time.RFC3339))
 }
 
 // obtainNewPassword 决定新密码来源：

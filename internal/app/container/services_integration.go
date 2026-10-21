@@ -1,8 +1,14 @@
 package container
 
 import (
+	"strings"
+	"time"
+
+	"github.com/dujiao-next/internal/app/adminloginguard"
 	catalogmappingbootstrap "github.com/dujiao-next/internal/bootstrap/catalogmapping"
 	telegrambroadcast "github.com/dujiao-next/internal/bootstrap/telegrambroadcast"
+	"github.com/dujiao-next/internal/cache"
+	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/logger"
 	apicredentialapp "github.com/dujiao-next/internal/modules/apicredential/application"
 	auditlogapp "github.com/dujiao-next/internal/modules/auditlog/application"
@@ -45,6 +51,7 @@ func (c *Container) initIntegrationServices() {
 	c.UserLoginLogService = auditlogapp.NewUserLoginService(c.UserLoginLogRepo)
 	c.AuthzAuditService = auditlogapp.NewAuthzService(c.AuthzAuditLogRepo)
 	c.AdminLoginLogService = auditlogapp.NewAdminLoginService(c.AdminLoginLogRepo)
+	c.AdminLoginGuard = newAdminLoginGuard(c)
 	c.NotificationLogService = notificationapp.NewLogService(c.NotificationLogRepo)
 	c.DashboardService = dashboardapp.NewService(c.DashboardRepo, c.SettingService)
 	telegramNotifyService := notifyapp.NewService(c.SettingService, c.Config.TelegramAuth, notifybotapi.New())
@@ -140,4 +147,24 @@ func (c *Container) initIntegrationServices() {
 		telegrambroadcast.NewDispatcher(c.QueueClient),
 		telegramNotifyService,
 	)
+}
+
+func newAdminLoginGuard(c *Container) *adminloginguard.Guard {
+	if c == nil || c.Config == nil {
+		return adminloginguard.New(adminloginguard.Options{})
+	}
+	prefix := strings.TrimSpace(c.Config.Redis.Prefix)
+	if prefix == "" {
+		prefix = constants.RedisPrefixDefault
+	}
+	cfg := c.Config.Security.LoginGuard
+	return adminloginguard.New(adminloginguard.Options{
+		Redis:           cache.Client(),
+		Prefix:          prefix,
+		Window:          time.Duration(cfg.WindowSeconds) * time.Second,
+		MaxFailures:     cfg.MaxFailures,
+		BanFor:          time.Duration(cfg.BanSeconds) * time.Second,
+		StaticWhitelist: cfg.IPWhitelist,
+		Settings:        c.SettingService,
+	})
 }

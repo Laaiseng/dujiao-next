@@ -137,7 +137,7 @@ func SetupRouter(cfg *config.Config, c *container.Container) *gin.Engine {
 	channelMemberLevelHandler := memberleveltransport.NewChannelHandler(c.MemberLevelService)
 	adminApiCredentialHandler := apicredentialtransport.NewAdminHandler(c.ApiCredentialService)
 	userApiCredentialHandler := apicredentialtransport.NewUserHandler(c.ApiCredentialService)
-	adminAuditLogHandler := auditlogtransport.NewAdminHandler(c.AuthzAuditService, c.UserLoginLogService)
+	adminAuditLogHandler := auditlogtransport.NewAdminHandler(c.AuthzAuditService, c.UserLoginLogService, c.AdminLoginLogService, c.AdminLoginGuard)
 	adminCardSecretHandler := cardsecrettransport.NewAdminHandler(c.CardSecretService)
 	adminCatalogCategoryHandler := categoryhttp.NewAdminCategoryHandler(c.CategoryService)
 	adminCatalogProductHandler := producthttp.NewAdminProductHandler(

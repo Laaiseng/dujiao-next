@@ -133,8 +133,11 @@ func TestRouteDomainFilesPreserveTrustBoundaries(t *testing.T) {
 		{
 			file: "routes_admin.go",
 			required: []string{
-				`adminauthtransport.RegisterAdminLoginAuthRoutes(admin, adminLoginHandler, middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP))`,
-				`adminauthtransport.RegisterAdmin2FAAuthRoutes(admin, admin2FAHandler, middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP))`,
+				`adminLoginRule.ResetOnSuccess = true`,
+				`middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP)`,
+				`adminloginguard.Protect(c.AdminLoginGuard, adminLoginLimit, adminLoginBanAudit(c))`,
+				`adminauthtransport.RegisterAdminLoginAuthRoutes(admin, adminLoginHandler, adminLoginGuard)`,
+				`adminauthtransport.RegisterAdmin2FAAuthRoutes(admin, admin2FAHandler, adminLoginGuard)`,
 				`adminauthtransport.RegisterAdminPasswordRoutes(authorized, adminLoginHandler)`,
 				`adminauthtransport.RegisterAdmin2FARoutes(authorized, admin2FAHandler)`,
 				`adminauthtransport.RegisterAdminUser2FARoutes(authorized, adminUser2FAHandler)`,

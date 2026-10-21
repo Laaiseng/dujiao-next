@@ -1,14 +1,17 @@
 package adminauthhttp
 
 import (
+	"context"
 	"errors"
+	"net/http"
 
-	ginutil "github.com/dujiao-next/internal/platform/http/ginutil"
-
+	"github.com/dujiao-next/internal/app/adminloginguard"
 	"github.com/dujiao-next/internal/constants"
 	"github.com/dujiao-next/internal/i18n"
+	"github.com/dujiao-next/internal/logger"
 	captcha "github.com/dujiao-next/internal/modules/captcha/contract"
 	captchahttp "github.com/dujiao-next/internal/modules/captcha/transport/http"
+	ginutil "github.com/dujiao-next/internal/platform/http/ginutil"
 	"github.com/dujiao-next/internal/platform/http/response"
 
 	"github.com/gin-gonic/gin"
@@ -52,18 +55,25 @@ type LoginAuthService interface {
 	ChangePassword(adminID uint, oldPassword, newPassword string) error
 }
 
+// LoginAttemptGuard 统计后台登录失败并在成功后清计数。白名单与已封禁由中间件处理。
+type LoginAttemptGuard interface {
+	RecordFailure(ctx context.Context, rawIP, fingerprint string) (adminloginguard.Failure, error)
+	ClearFailures(ctx context.Context, rawIP, fingerprint string) error
+}
+
 // AdminLoginHandler 处理管理员登录与改密 HTTP 请求。
 type AdminLoginHandler struct {
 	auth     LoginAuthService
 	captcha  CaptchaVerifier
 	recorder AdminLoginRecorder
+	guard    LoginAttemptGuard
 }
 
-func NewAdminLoginHandler(auth LoginAuthService, captcha CaptchaVerifier, recorder AdminLoginRecorder) *AdminLoginHandler {
+func NewAdminLoginHandler(auth LoginAuthService, captcha CaptchaVerifier, recorder AdminLoginRecorder, guard LoginAttemptGuard) *AdminLoginHandler {
 	if auth == nil {
 		panic("admin login handler: auth is nil")
 	}
-	return &AdminLoginHandler{auth: auth, captcha: captcha, recorder: recorder}
+	return &AdminLoginHandler{auth: auth, captcha: captcha, recorder: recorder, guard: guard}
 }
 
 func (h *AdminLoginHandler) writeLoginLog(c *gin.Context, adminID uint, username, eventType, status, failReason string, operatorID *uint) {
@@ -76,7 +86,7 @@ func (h *AdminLoginHandler) writeLoginLog(c *gin.Context, adminID uint, username
 			requestID = value
 		}
 	}
-	h.recorder.Record(adminID, username, eventType, status, failReason, c.ClientIP(), c.Request.UserAgent(), requestID, operatorID)
+	h.recorder.Record(adminID, username, eventType, status, failReason, c.ClientIP(), c.Request.UserAgent(), requestID, operatorID, adminloginguard.ObservedFingerprint(c), contextInt(c, adminLoginAuditIPFailKey), contextInt(c, adminLoginAuditFPFailKey))
 }
 
 // LoginRequest 登录请求。
@@ -119,15 +129,26 @@ func (h *AdminLoginHandler) AdminLogin(c *gin.Context) {
 		if !errors.Is(err, ErrInvalidCredentials) {
 			failReason = constants.AdminLoginFailInternal
 		}
-		h.writeLoginLog(c, 0, req.Username, constants.AdminLoginEventLoginPassword, constants.AdminLoginStatusFailed, failReason, nil)
 		if errors.Is(err, ErrInvalidCredentials) {
+			result := applyLoginFailure(c, h.guard)
+			failReason = constants.AdminLoginFailPasswordWrong
+			if result.Banned {
+				failReason = constants.AdminLoginFailAutoBanned
+			}
+			h.writeLoginLog(c, 0, req.Username, constants.AdminLoginEventLoginPassword, constants.AdminLoginStatusFailed, failReason, nil)
+			if result.Banned {
+				respondAdminLoginBanned(c, result)
+				return
+			}
 			ginutil.RespondError(c, response.CodeUnauthorized, "error.admin_login_invalid", nil)
 			return
 		}
+		h.writeLoginLog(c, 0, req.Username, constants.AdminLoginEventLoginPassword, constants.AdminLoginStatusFailed, failReason, nil)
 		ginutil.RespondError(c, response.CodeInternal, "error.login_failed", err)
 		return
 	}
 
+	applyLoginSuccess(c, h.guard)
 	if loginRes.RequiresTOTP {
 		h.writeLoginLog(c, loginRes.Admin.ID, loginRes.Admin.Username, constants.AdminLoginEventLoginPassword, constants.AdminLoginStatusSuccess, "", nil)
 		response.Success(c, gin.H{
@@ -184,6 +205,65 @@ func (h *AdminLoginHandler) UpdateAdminPassword(c *gin.Context) {
 	}
 
 	response.Success(c, nil)
+}
+
+const (
+	adminLoginAuditIPFailKey = "admin_login_audit_ip_fail"
+	adminLoginAuditFPFailKey = "admin_login_audit_fp_fail"
+)
+
+func applyLoginFailure(c *gin.Context, guard LoginAttemptGuard) adminloginguard.Failure {
+	if guard == nil || c == nil || c.Request == nil || adminloginguard.WhitelistedFromContext(c) {
+		return adminloginguard.Failure{}
+	}
+	result, err := guard.RecordFailure(c.Request.Context(), c.ClientIP(), adminloginguard.ObservedFingerprint(c))
+	if err != nil {
+		logger.Warnw("admin_login_guard_record_failed", "error", err)
+		return adminloginguard.Failure{}
+	}
+	c.Set(adminLoginAuditIPFailKey, result.IPFails)
+	c.Set(adminLoginAuditFPFailKey, result.FPFails)
+	return result
+}
+
+func applyLoginSuccess(c *gin.Context, guard LoginAttemptGuard) {
+	if guard == nil || c == nil || c.Request == nil {
+		return
+	}
+	if err := guard.ClearFailures(c.Request.Context(), c.ClientIP(), adminloginguard.ObservedFingerprint(c)); err != nil {
+		logger.Warnw("admin_login_guard_clear_failed", "error", err)
+	}
+}
+
+func respondAdminLoginBanned(c *gin.Context, result adminloginguard.Failure) {
+	locale := i18n.ResolveLocale(c)
+	if result.Permanent {
+		response.ErrorWithHTTPStatus(c, http.StatusTooManyRequests, response.CodeTooManyRequests, i18n.T(locale, "error.admin_login_banned_permanent"))
+		return
+	}
+	wait := result.RetryAfterSeconds
+	if wait < 1 {
+		wait = 1
+	}
+	response.ErrorWithHTTPStatus(c, http.StatusTooManyRequests, response.CodeTooManyRequests, i18n.Sprintf(locale, "error.admin_login_banned", wait))
+}
+
+func contextInt(c *gin.Context, key string) int {
+	if c == nil {
+		return 0
+	}
+	value, ok := c.Get(key)
+	if !ok {
+		return 0
+	}
+	switch n := value.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 func respondWeakPassword(c *gin.Context, err error) {

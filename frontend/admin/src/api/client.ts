@@ -2,6 +2,7 @@ import i18n from '@/i18n'
 import type { ApiResponse } from './types'
 import { notifyError } from '@/utils/notify'
 import { adminUrl } from '@/utils/adminBase'
+import { isAdminLoginFingerprintPath, loginFingerprint } from '@/utils/loginFingerprint'
 
 export type { ApiResponse }
 
@@ -115,6 +116,13 @@ async function request(method: string, path: string, bodyOrOptions?: any, option
 
   if (body !== undefined && !(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
+  }
+
+  if (isAdminLoginFingerprintPath(path)) {
+    const fingerprint = await loginFingerprint()
+    if (fingerprint) {
+      headers['X-Login-Fingerprint'] = fingerprint
+    }
   }
 
   const controller = new AbortController()

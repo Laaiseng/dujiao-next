@@ -7,6 +7,7 @@ import (
 
 	ginutil "github.com/dujiao-next/internal/platform/http/ginutil"
 
+	"github.com/dujiao-next/internal/app/adminloginguard"
 	"github.com/dujiao-next/internal/constants"
 	admindomain "github.com/dujiao-next/internal/modules/identity/admin/domain"
 	"github.com/dujiao-next/internal/platform/http/response"
@@ -75,7 +76,7 @@ type ChallengeStore interface {
 
 // AdminLoginRecorder 记录管理员登录审计日志。
 type AdminLoginRecorder interface {
-	Record(adminID uint, username, eventType, status, failReason, clientIP, userAgent, requestID string, operatorID *uint)
+	Record(adminID uint, username, eventType, status, failReason, clientIP, userAgent, requestID string, operatorID *uint, fingerprint string, ipFail, fpFail int)
 }
 
 // TOTPService 是管理员 2FA 绑定管理端口。
@@ -103,16 +104,17 @@ type Admin2FAHandler struct {
 	auth       AuthService
 	challenges ChallengeStore
 	recorder   AdminLoginRecorder
+	guard      LoginAttemptGuard
 }
 
-func NewAdmin2FAHandler(totp TOTPService, auth AuthService, challenges ChallengeStore, recorder AdminLoginRecorder) *Admin2FAHandler {
+func NewAdmin2FAHandler(totp TOTPService, auth AuthService, challenges ChallengeStore, recorder AdminLoginRecorder, guard LoginAttemptGuard) *Admin2FAHandler {
 	if totp == nil {
 		panic("admin 2fa handler: totp is nil")
 	}
 	if auth == nil {
 		panic("admin 2fa handler: auth is nil")
 	}
-	return &Admin2FAHandler{totp: totp, auth: auth, challenges: challenges, recorder: recorder}
+	return &Admin2FAHandler{totp: totp, auth: auth, challenges: challenges, recorder: recorder, guard: guard}
 }
 
 func (h *Admin2FAHandler) writeLoginLog(c *gin.Context, adminID uint, username, eventType, status, failReason string, operatorID *uint) {
@@ -125,7 +127,7 @@ func (h *Admin2FAHandler) writeLoginLog(c *gin.Context, adminID uint, username, 
 			requestID = value
 		}
 	}
-	h.recorder.Record(adminID, username, eventType, status, failReason, c.ClientIP(), c.Request.UserAgent(), requestID, operatorID)
+	h.recorder.Record(adminID, username, eventType, status, failReason, c.ClientIP(), c.Request.UserAgent(), requestID, operatorID, adminloginguard.ObservedFingerprint(c), contextInt(c, adminLoginAuditIPFailKey), contextInt(c, adminLoginAuditFPFailKey))
 }
 
 func adminUsername(c *gin.Context) string {
@@ -327,11 +329,19 @@ func (h *Admin2FAHandler) Verify2FA(c *gin.Context) {
 			event = constants.AdminLoginEventLoginRecoveryCode
 			failReason = constants.AdminLoginFailInvalidRecoveryCode
 		}
+		result := applyLoginFailure(c, h.guard)
+		if result.Banned {
+			failReason = constants.AdminLoginFailAutoBanned
+		}
 		h.writeLoginLog(c, claims.AdminID, username, event, constants.AdminLoginStatusFailed, failReason, nil)
+		if failCnt >= challengeMaxFailures && h.challenges != nil {
+			h.challenges.Revoke(ctx, claims.JTI)
+		}
+		if result.Banned {
+			respondAdminLoginBanned(c, result)
+			return
+		}
 		if failCnt >= challengeMaxFailures {
-			if h.challenges != nil {
-				h.challenges.Revoke(ctx, claims.JTI)
-			}
 			ginutil.RespondError(c, response.CodeUnauthorized, "error.totp_too_many_attempts", nil)
 			return
 		}
@@ -357,6 +367,7 @@ func (h *Admin2FAHandler) Verify2FA(c *gin.Context) {
 	if req.RecoveryCode != "" {
 		successEvent = constants.AdminLoginEventLoginRecoveryCode
 	}
+	applyLoginSuccess(c, h.guard)
 	h.writeLoginLog(c, claims.AdminID, username, successEvent, constants.AdminLoginStatusSuccess, "", nil)
 	response.Success(c, gin.H{
 		"requires_totp": false,

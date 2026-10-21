@@ -554,6 +554,32 @@ export interface AdminUserLoginLog {
   created_at: string
 }
 
+export interface AdminLoginLog {
+  id: number
+  admin_id: number
+  username: string
+  event_type: string
+  status: string
+  fail_reason?: string
+  client_ip: string
+  fingerprint?: string
+  ip_fail_count?: number
+  fp_fail_count?: number
+  user_agent?: string
+  request_id?: string
+  created_at: string
+}
+
+export interface AdminLoginBan {
+  kind: 'ip' | 'fingerprint' | string
+  value: string
+}
+
+export interface AdminLoginGuardConfig {
+  ip_whitelist?: string[]
+  permanent_bans?: AdminLoginBan[]
+}
+
 // --- SiteConnection ---
 export interface AdminSiteConnection {
   id: number

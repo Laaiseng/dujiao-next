@@ -498,6 +498,7 @@ const (
 	SettingFieldRegistrationInviteOnly      = "invite_only_enabled"
 
 	SettingKeyOrderRiskControlConfig = "order_risk_control_config"
+	SettingKeyAdminLoginGuardConfig  = "admin_login_guard_config"
 
 	SettingKeyUpstreamSyncConfig        = "upstream_sync_config"
 	SettingFieldUpstreamSyncIntervalMin = "interval_minutes"

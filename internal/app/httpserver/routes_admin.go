@@ -1,14 +1,19 @@
 package httpserver
 
 import (
+	"strings"
+
+	"github.com/dujiao-next/internal/app/adminloginguard"
 	"github.com/dujiao-next/internal/app/container"
 	"github.com/dujiao-next/internal/app/httpserver/middleware"
 	affiliatebootstrap "github.com/dujiao-next/internal/bootstrap/affiliate"
 	settingsbootstrap "github.com/dujiao-next/internal/bootstrap/settingshttp"
 	"github.com/dujiao-next/internal/config"
+	"github.com/dujiao-next/internal/constants"
 	adproxytransport "github.com/dujiao-next/internal/modules/adproxy/transport/http"
 	affiliatetransport "github.com/dujiao-next/internal/modules/affiliate/transport/http"
 	apicredentialtransport "github.com/dujiao-next/internal/modules/apicredential/transport/http"
+	auditlogapp "github.com/dujiao-next/internal/modules/auditlog/application"
 	auditlogtransport "github.com/dujiao-next/internal/modules/auditlog/transport/http"
 	cardsecrettransport "github.com/dujiao-next/internal/modules/cardsecret/transport/http"
 	categoryhttp "github.com/dujiao-next/internal/modules/catalog/category/transport/http"
@@ -87,9 +92,14 @@ func registerAdminRoutes(
 ) {
 	admin := apiV1.Group("/admin")
 
-	// 登录接口（无需鉴权）
-	adminauthtransport.RegisterAdminLoginAuthRoutes(admin, adminLoginHandler, middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP))
-	adminauthtransport.RegisterAdmin2FAAuthRoutes(admin, admin2FAHandler, middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP))
+	// 登录接口（无需鉴权）。
+	// 失败封禁先于旧限流：已封禁请求不 INCR、不校验密码。
+	// 旧限流改为成功清零，避免正常登录（含 2FA 的两次 POST）把自己锁住。
+	adminLoginRule.ResetOnSuccess = true
+	adminLoginLimit := middleware.RateLimitMiddleware(redisClient, adminLoginRule, middleware.KeyByIP)
+	adminLoginGuard := adminloginguard.Protect(c.AdminLoginGuard, adminLoginLimit, adminLoginBanAudit(c))
+	adminauthtransport.RegisterAdminLoginAuthRoutes(admin, adminLoginHandler, adminLoginGuard)
+	adminauthtransport.RegisterAdmin2FAAuthRoutes(admin, admin2FAHandler, adminLoginGuard)
 
 	// 需要鉴权的接口
 	authorized := admin.Use(middleware.JWTAuthMiddleware(cfg.JWT.SecretKey, c.AdminStore), middleware.AdminRBACMiddleware(c.AuthzService))
@@ -198,4 +208,30 @@ func registerAdminRoutes(
 
 	// Telegram Bot 群发
 	broadcasthttp.RegisterAdminRoutes(authorized, broadcasthttp.NewAdminHandler(c.TelegramBroadcastService))
+}
+
+func adminLoginBanAudit(c *container.Container) adminloginguard.AuditFunc {
+	return func(ctx *gin.Context, decision adminloginguard.Decision) {
+		if c == nil || c.AdminLoginLogService == nil || ctx == nil || ctx.Request == nil {
+			return
+		}
+		requestID, _ := ctx.Get("request_id")
+		rid, _ := requestID.(string)
+		event := constants.AdminLoginEventLoginPassword
+		if strings.Contains(ctx.Request.URL.Path, "/login/verify-2fa") {
+			event = constants.AdminLoginEventLogin2FAVerify
+		}
+		_ = c.AdminLoginLogService.Record(auditlogapp.AdminLoginRecord{
+			Username:    decision.Username,
+			EventType:   event,
+			Status:      constants.AdminLoginStatusFailed,
+			FailReason:  constants.AdminLoginFailAlreadyBanned,
+			ClientIP:    ctx.ClientIP(),
+			Fingerprint: decision.Subject.Fingerprint,
+			IPFailCount: decision.IPFails,
+			FPFailCount: decision.FPFails,
+			UserAgent:   ctx.Request.UserAgent(),
+			RequestID:   rid,
+		})
+	}
 }

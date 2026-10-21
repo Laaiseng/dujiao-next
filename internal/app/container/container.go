@@ -1,6 +1,7 @@
 package container
 
 import (
+	"github.com/dujiao-next/internal/app/adminloginguard"
 	"github.com/dujiao-next/internal/authz"
 	"github.com/dujiao-next/internal/config"
 	adproxyapp "github.com/dujiao-next/internal/modules/adproxy/application"
@@ -166,6 +167,7 @@ type Container struct {
 	UserLoginLogService           *auditlogapp.UserLoginService
 	AuthzAuditService             *auditlogapp.AuthzService
 	AdminLoginLogService          *auditlogapp.AdminLoginService
+	AdminLoginGuard               *adminloginguard.Guard
 	NotificationLogService        *notificationapp.LogService
 	DashboardService              *dashboardapp.Service
 	NotificationService           *notificationapp.Service
