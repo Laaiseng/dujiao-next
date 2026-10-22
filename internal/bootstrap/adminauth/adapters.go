@@ -198,20 +198,23 @@ type adminLoginRecorderAdapter struct {
 	logs *auditlogapp.AdminLoginService
 }
 
-func (a adminLoginRecorderAdapter) Record(adminID uint, username, eventType, status, failReason, clientIP, userAgent, requestID string, operatorID *uint) {
+func (a adminLoginRecorderAdapter) Record(adminID uint, username, eventType, status, failReason, clientIP, userAgent, requestID string, operatorID *uint, fingerprint string, ipFail, fpFail int) {
 	if a.logs == nil {
 		return
 	}
 	_ = a.logs.Record(auditlogapp.AdminLoginRecord{
-		AdminID:    adminID,
-		Username:   username,
-		EventType:  eventType,
-		Status:     status,
-		FailReason: failReason,
-		ClientIP:   clientIP,
-		UserAgent:  userAgent,
-		RequestID:  strings.TrimSpace(requestID),
-		OperatorID: operatorID,
+		AdminID:     adminID,
+		Username:    username,
+		EventType:   eventType,
+		Status:      status,
+		FailReason:  failReason,
+		ClientIP:    clientIP,
+		Fingerprint: fingerprint,
+		IPFailCount: ipFail,
+		FPFailCount: fpFail,
+		UserAgent:   userAgent,
+		RequestID:   strings.TrimSpace(requestID),
+		OperatorID:  operatorID,
 	})
 }
 

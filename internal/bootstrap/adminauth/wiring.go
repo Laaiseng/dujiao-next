@@ -19,12 +19,14 @@ func New(c *container.Container) Handlers {
 			adminLoginAuthTransportAdapter{auth: c.AuthService},
 			captchahttp.NewVerifier(c.CaptchaService),
 			recorder,
+			c.AdminLoginGuard,
 		),
 		TwoFA: adminauthtransport.NewAdmin2FAHandler(
 			admin2FATOTPTransportAdapter{totp: c.TOTPService},
 			admin2FAAuthTransportAdapter{auth: c.AuthService},
 			admin2FAChallengeStoreAdapter{},
 			recorder,
+			c.AdminLoginGuard,
 		),
 		UserTwoFA: adminauthtransport.NewAdminUser2FAHandler(
 			adminUser2FATransportAdapter{totp: c.UserTOTPService},

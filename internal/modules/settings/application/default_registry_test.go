@@ -10,6 +10,7 @@ import (
 
 func TestDefaultSettingRegistryCoversLegacyNormalizedKeys(t *testing.T) {
 	want := []string{
+		constants.SettingKeyAdminLoginGuardConfig,
 		constants.SettingKeyAffiliateConfig,
 		constants.SettingKeyCallbackRoutesConfig,
 		constants.SettingKeyDashboardConfig,

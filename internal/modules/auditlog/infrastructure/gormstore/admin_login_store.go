@@ -40,6 +40,21 @@ func (r *AdminLoginStore) List(filter contract.AdminLoginFilter) ([]domain.Admin
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}
+	if filter.FailReason != "" {
+		query = query.Where("fail_reason = ?", filter.FailReason)
+	}
+	if filter.ClientIP != "" {
+		query = query.Where("client_ip = ?", filter.ClientIP)
+	}
+	if filter.Fingerprint != "" {
+		query = query.Where("fingerprint = ?", filter.Fingerprint)
+	}
+	if filter.CreatedFrom != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedTo)
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {

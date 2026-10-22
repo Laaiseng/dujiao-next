@@ -10,15 +10,18 @@ import (
 
 // AdminLoginRecord 描述一次管理员认证或 2FA 操作的审计事实。
 type AdminLoginRecord struct {
-	AdminID    uint
-	Username   string
-	EventType  string
-	Status     string
-	FailReason string
-	ClientIP   string
-	UserAgent  string
-	RequestID  string
-	OperatorID *uint
+	AdminID     uint
+	Username    string
+	EventType   string
+	Status      string
+	FailReason  string
+	ClientIP    string
+	Fingerprint string
+	IPFailCount int
+	FPFailCount int
+	UserAgent   string
+	RequestID   string
+	OperatorID  *uint
 }
 
 // AdminLoginService 是管理员登录审计的应用边界，调用方不直接接触持久化端口。
@@ -35,16 +38,19 @@ func (s *AdminLoginService) Record(input AdminLoginRecord) error {
 		return nil
 	}
 	return s.repo.Create(&domain.AdminLoginLog{
-		AdminID:    input.AdminID,
-		Username:   strings.TrimSpace(input.Username),
-		EventType:  strings.TrimSpace(input.EventType),
-		Status:     strings.TrimSpace(input.Status),
-		FailReason: strings.TrimSpace(input.FailReason),
-		ClientIP:   strings.TrimSpace(input.ClientIP),
-		UserAgent:  strings.TrimSpace(input.UserAgent),
-		RequestID:  strings.TrimSpace(input.RequestID),
-		OperatorID: input.OperatorID,
-		CreatedAt:  time.Now(),
+		AdminID:     input.AdminID,
+		Username:    strings.TrimSpace(input.Username),
+		EventType:   strings.TrimSpace(input.EventType),
+		Status:      strings.TrimSpace(input.Status),
+		FailReason:  strings.TrimSpace(input.FailReason),
+		ClientIP:    strings.TrimSpace(input.ClientIP),
+		Fingerprint: strings.TrimSpace(input.Fingerprint),
+		IPFailCount: input.IPFailCount,
+		FPFailCount: input.FPFailCount,
+		UserAgent:   strings.TrimSpace(input.UserAgent),
+		RequestID:   strings.TrimSpace(input.RequestID),
+		OperatorID:  input.OperatorID,
+		CreatedAt:   time.Now(),
 	})
 }
 

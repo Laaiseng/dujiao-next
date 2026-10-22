@@ -1,10 +1,8 @@
 package contract
 
 import (
-	"net"
-	"strings"
-
 	settingssecurity "github.com/dujiao-next/internal/modules/settings/schema/security"
+	"github.com/dujiao-next/internal/shared/netaddr"
 )
 
 // OrderItem 是风控所需的最小订单项快照。
@@ -33,16 +31,5 @@ type CheckResult struct {
 
 // NormalizeRiskIP 生成游客风控键：IPv4 使用完整地址，IPv6 按 /64 前缀聚合。
 func NormalizeRiskIP(raw string) string {
-	ip := net.ParseIP(strings.TrimSpace(raw))
-	if ip == nil {
-		return ""
-	}
-	if ipv4 := ip.To4(); ipv4 != nil {
-		return ipv4.String()
-	}
-	network := ip.Mask(net.CIDRMask(64, 128))
-	if network == nil {
-		return ""
-	}
-	return network.String() + "/64"
+	return netaddr.NormalizeRiskIP(raw)
 }

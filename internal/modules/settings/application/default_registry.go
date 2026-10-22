@@ -68,6 +68,10 @@ var defaultSettingRegistry = MustNewRegistry(
 		Normalize: settingssecurity.NormalizeOrderRiskControlConfigJSON,
 	},
 	Definition{
+		Key:       constants.SettingKeyAdminLoginGuardConfig,
+		Normalize: settingssecurity.NormalizeAdminLoginGuardConfigJSON,
+	},
+	Definition{
 		Key:       constants.SettingKeyUpstreamSyncConfig,
 		Normalize: settingsintegration.NormalizeUpstreamSyncConfigJSON,
 	},

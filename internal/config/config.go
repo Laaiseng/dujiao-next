@@ -240,6 +240,7 @@ var (
 		"Cache-Control",
 		"X-Requested-With",
 		"X-CSRF-Token",
+		"X-Login-Fingerprint",
 	}
 )
 
@@ -261,7 +262,18 @@ func DefaultCORSAllowedHeaders() []string {
 // SecurityConfig 安全配置
 type SecurityConfig struct {
 	LoginRateLimit LoginRateLimitConfig `mapstructure:"login_rate_limit"`
+	LoginGuard     LoginGuardConfig     `mapstructure:"login_guard"`
 	PasswordPolicy PasswordPolicyConfig `mapstructure:"password_policy"`
+}
+
+// LoginGuardConfig 后台登录失败自动封禁。
+// 只累计密码 / 2FA 失败；成功（含进入 2FA challenge）清失败计数，不清已生效的封禁。
+// 永久封禁不在这里配置，只来自后台手动操作。
+type LoginGuardConfig struct {
+	WindowSeconds int      `mapstructure:"window_seconds"`
+	MaxFailures   int      `mapstructure:"max_failures"`
+	BanSeconds    int      `mapstructure:"ban_seconds"`
+	IPWhitelist   []string `mapstructure:"ip_whitelist"`
 }
 
 // LoginRateLimitConfig 登录限流配置
@@ -392,6 +404,10 @@ func Load() *Config {
 	viper.SetDefault("security.login_rate_limit.window_seconds", 300)
 	viper.SetDefault("security.login_rate_limit.max_attempts", 5)
 	viper.SetDefault("security.login_rate_limit.block_seconds", 900)
+	viper.SetDefault("security.login_guard.window_seconds", 900)
+	viper.SetDefault("security.login_guard.max_failures", 5)
+	viper.SetDefault("security.login_guard.ban_seconds", 3600)
+	viper.SetDefault("security.login_guard.ip_whitelist", []string{})
 	viper.SetDefault("security.password_policy.min_length", 8)
 	viper.SetDefault("security.password_policy.require_upper", true)
 	viper.SetDefault("security.password_policy.require_lower", true)

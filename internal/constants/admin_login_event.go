@@ -22,6 +22,9 @@ const (
 // AdminLoginFailReason 失败原因
 const (
 	AdminLoginFailInvalidCredentials  = "invalid_credentials"
+	AdminLoginFailPasswordWrong       = "password_wrong"
+	AdminLoginFailAutoBanned          = "auto_banned"
+	AdminLoginFailAlreadyBanned       = "already_banned"
 	AdminLoginFailInvalidTOTPCode     = "invalid_totp_code"
 	AdminLoginFailInvalidRecoveryCode = "invalid_recovery_code"
 	AdminLoginFailChallengeExpired    = "challenge_expired"

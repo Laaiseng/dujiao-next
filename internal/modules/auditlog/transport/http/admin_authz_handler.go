@@ -1,6 +1,7 @@
 package auditloghttp
 
 import (
+	"context"
 	"strings"
 
 	"github.com/dujiao-next/internal/modules/auditlog/contract"
@@ -19,13 +20,30 @@ type UserLoginLogReader interface {
 	ListForAdmin(filter contract.UserLoginFilter) ([]domain.UserLoginLog, int64, error)
 }
 
-type AdminHandler struct {
-	authzLogs     AuthzLogReader
-	userLoginLogs UserLoginLogReader
+type AdminLoginLogReader interface {
+	List(filter contract.AdminLoginFilter) ([]domain.AdminLoginLog, int64, error)
 }
 
-func NewAdminHandler(authzLogs AuthzLogReader, userLoginLogs UserLoginLogReader) *AdminHandler {
-	return &AdminHandler{authzLogs: authzLogs, userLoginLogs: userLoginLogs}
+// AdminLoginBanController 解除或手动永久封禁后台登录主体。
+type AdminLoginBanController interface {
+	Unban(ctx context.Context, rawIP, fingerprint string) error
+	BanPermanent(ctx context.Context, rawIP, fingerprint string) error
+}
+
+type AdminHandler struct {
+	authzLogs      AuthzLogReader
+	userLoginLogs  UserLoginLogReader
+	adminLoginLogs AdminLoginLogReader
+	loginBans      AdminLoginBanController
+}
+
+func NewAdminHandler(authzLogs AuthzLogReader, userLoginLogs UserLoginLogReader, adminLoginLogs AdminLoginLogReader, loginBans AdminLoginBanController) *AdminHandler {
+	return &AdminHandler{
+		authzLogs:      authzLogs,
+		userLoginLogs:  userLoginLogs,
+		adminLoginLogs: adminLoginLogs,
+		loginBans:      loginBans,
+	}
 }
 
 // ListAuthzAuditLogs 获取权限审计日志列表

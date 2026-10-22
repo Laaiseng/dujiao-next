@@ -32,12 +32,17 @@ type AuthzFilter struct {
 }
 
 type AdminLoginFilter struct {
-	Page      int
-	PageSize  int
-	AdminID   *uint
-	Username  string
-	EventType string
-	Status    string
+	Page        int
+	PageSize    int
+	AdminID     *uint
+	Username    string
+	EventType   string
+	Status      string
+	FailReason  string
+	ClientIP    string
+	Fingerprint string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
 }
 
 type UserLoginRepository interface {

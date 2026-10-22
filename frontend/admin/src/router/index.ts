@@ -292,6 +292,12 @@ const routes = [
         meta: { permission: 'GET:/admin/authz/audit-logs' },
       },
       {
+        path: 'admin-login-logs',
+        name: 'admin-login-logs',
+        component: () => import('@/views/admin/AdminLoginLogs.vue'),
+        meta: { permission: 'GET:/admin/admin-login-logs' },
+      },
+      {
         path: 'site-connections',
         name: 'site-connections',
         component: () => import('@/views/admin/SiteConnections.vue'),

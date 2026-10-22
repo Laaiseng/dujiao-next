@@ -135,6 +135,7 @@ cors:
     - Cache-Control
     - X-Requested-With
     - X-CSRF-Token
+    - X-Login-Fingerprint
   allow_credentials: true
   max_age: 600
 
@@ -143,12 +144,30 @@ security:
   # 同时按来源 IP（换邮箱也计入）和「邮箱 + IP」计数。
   # 超过 max_attempts 返回 HTTP 429，且不再校验密码。
   # 默认：300 秒内最多 5 次，然后封禁 900 秒。
+  # 后台登录成功（含进入 2FA challenge）会清掉这次窗口计数，正常登录不会把自己锁住。
+  # 前台登录本来就是失败累计、成功清零，这条不改变前台。
   # 可选纵深：后台验证码里把 login 场景打开（配置默认 captcha.scenes.login 为 false）。
   # 验证码不能代替这里的限流。
   login_rate_limit:
     window_seconds: 300
     max_attempts: 5
     block_seconds: 900
+  # 后台登录失败自动封禁（只计密码错误和 2FA 验证失败，不计成功）。
+  # IP 与浏览器指纹分开计数，任一达到 max_failures 就封对应主体 ban_seconds 秒。
+  # 已封禁的请求直接拒绝，不再累计，也不校验密码。
+  # 永久封禁只来自后台手动操作，不要把 max_failures 改成 2 当作永久封：
+  # 先配好下面的白名单（以及后台「登录封禁」页里的热更新白名单）再考虑收紧。
+  # ip_whitelist 支持单 IP 和 CIDR，改完需重启。示例（不要取消注释除非这是你的地址）：
+  #   - 212.107.30.202
+  #   - 165.254.139.16
+  #   - 212.107.29.72
+  # 跨域部署如果显式配置了 cors.allowed_headers，需要带上 X-Login-Fingerprint，
+  # 否则浏览器预检会丢掉后台登录指纹。同源反代不受影响。
+  login_guard:
+    window_seconds: 900
+    max_failures: 5
+    ban_seconds: 3600
+    ip_whitelist: []
   password_policy:
     min_length: 8
     require_upper: true
