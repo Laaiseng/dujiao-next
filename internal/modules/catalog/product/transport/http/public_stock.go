@@ -32,6 +32,14 @@ func (h *PublicHandler) decorateProductStock(product *productdomain.Product, ite
 		fulfillmentType = constants.FulfillmentTypeManual
 	}
 
+	// plus_issue：零库存发卡，店面按无限库存展示，真实产能由 plus 侧控制。
+	if fulfillmentType == constants.FulfillmentTypePlusIssue {
+		item.ManualStockAvailable = constants.ManualStockUnlimited
+		item.StockStatus = constants.ProductStockStatusUnlimited
+		item.IsSoldOut = false
+		return
+	}
+
 	// upstream 类型：根据 SKU 映射中的上游库存判断
 	if fulfillmentType == constants.FulfillmentTypeUpstream {
 		h.decorateUpstreamStock(product, item)

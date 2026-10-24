@@ -8,6 +8,38 @@ import (
 	"github.com/dujiao-next/internal/constants"
 )
 
+func TestDecorateProductStock_PlusIssueIsUnlimited(t *testing.T) {
+	h := &PublicHandler{}
+	product := &productdomain.Product{
+		ID:              1,
+		FulfillmentType: constants.FulfillmentTypePlusIssue,
+		SKUs: []productdomain.ProductSKU{
+			{ID: 11, SKUCode: productdomain.DefaultSKUCode, IsActive: true, ManualStockTotal: 0},
+		},
+	}
+
+	item := publicProductView{Product: *product}
+	h.decorateProductStock(product, &item)
+
+	if item.StockStatus != constants.ProductStockStatusUnlimited {
+		t.Fatalf("expected unlimited stock status, got %q", item.StockStatus)
+	}
+	if item.ManualStockAvailable != constants.ManualStockUnlimited {
+		t.Fatalf("expected manual stock unlimited, got %d", item.ManualStockAvailable)
+	}
+	if item.IsSoldOut {
+		t.Fatal("plus_issue products must not show as sold out")
+	}
+
+	resp, err := h.decoratePublicProduct(product, nil)
+	if err != nil {
+		t.Fatalf("decoratePublicProduct failed: %v", err)
+	}
+	if resp.IsSoldOut || resp.StockStatus != constants.ProductStockStatusUnlimited {
+		t.Fatalf("expected unlimited public response, got status=%q sold_out=%v", resp.StockStatus, resp.IsSoldOut)
+	}
+}
+
 func TestDecorateProductStock_AutoSkipsInactiveSKUs(t *testing.T) {
 	h := &PublicHandler{}
 	product := &productdomain.Product{
