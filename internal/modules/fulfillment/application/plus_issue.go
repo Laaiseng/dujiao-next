@@ -83,12 +83,8 @@ func (s *Service) CreatePlusIssue(orderID uint) (*fulfillmentdomain.Fulfillment,
 	}
 
 	paymentOrderID := orderID
-	paymentOrderNo := order.OrderNo
 	if order.ParentID != nil {
 		paymentOrderID = *order.ParentID
-		if parent, perr := s.orderStore.GetByID(paymentOrderID); perr == nil && parent != nil {
-			paymentOrderNo = parent.OrderNo
-		}
 	}
 	payments, err := s.paymentStore.ListByOrderID(paymentOrderID)
 	if err != nil {
@@ -97,6 +93,16 @@ func (s *Service) CreatePlusIssue(orderID uint) (*fulfillmentdomain.Fulfillment,
 	payment := pickSuccessfulPayment(payments)
 	if payment == nil || strings.TrimSpace(payment.ProviderRef) == "" {
 		return nil, ErrPlusIssuePaymentMissing
+	}
+	// bepusdt stores the gateway merchant order id (usually DJP...), not the mall DJ order no.
+	paymentOrderNo := strings.TrimSpace(payment.GatewayOrderNo)
+	if paymentOrderNo == "" {
+		paymentOrderNo = order.OrderNo
+		if order.ParentID != nil {
+			if parent, perr := s.orderStore.GetByID(paymentOrderID); perr == nil && parent != nil {
+				paymentOrderNo = parent.OrderNo
+			}
+		}
 	}
 
 	// One bepusdt trade_id can only fund one mall order on plus. Multi-line carts would need
