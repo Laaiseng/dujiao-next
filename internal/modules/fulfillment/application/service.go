@@ -12,8 +12,8 @@ import (
 	externalidentitycontract "github.com/dujiao-next/internal/modules/identity/externalidentity/contract"
 	orderapp "github.com/dujiao-next/internal/modules/order/application"
 	ordercontract "github.com/dujiao-next/internal/modules/order/contract"
-	paymentcontract "github.com/dujiao-next/internal/modules/payment/contract"
 	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
+	paymentcontract "github.com/dujiao-next/internal/modules/payment/contract"
 	settingsapp "github.com/dujiao-next/internal/modules/settings/application"
 
 	"github.com/dujiao-next/internal/config"

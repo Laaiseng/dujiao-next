@@ -46,6 +46,7 @@ func (c *Container) initPolicyAndSettingServices() {
 	}
 
 	c.SettingService = settingsapp.NewService(c.SettingRepo, c.Config.Order)
+	c.SettingService.SetSecretKey(c.Config.App.SecretKey)
 	c.EmailBrandResolver = mailbrandwiring.New(c.SettingService, c.ResellerStore)
 	c.ResellerDomainResolver = reseller.NewDomainResolver(c.ResellerStore, c.Config.Reseller)
 	c.ResellerPricingResolver = orderapp.NewResellerPricingResolver(c.ResellerStore)

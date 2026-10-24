@@ -99,39 +99,42 @@ func (s *Service) CreatePlusIssue(orderID uint) (*fulfillmentdomain.Fulfillment,
 		return nil, ErrPlusIssuePaymentMissing
 	}
 
-	var lines []string
-	for _, item := range order.Items {
-		if item.ProductID == 0 || item.Quantity <= 0 {
-			return nil, ErrFulfillmentInvalid
-		}
-		product, err := s.productReader.GetByID(strconv.FormatUint(uint64(item.ProductID), 10))
-		if err != nil || product == nil {
-			return nil, ErrPlusIssueProductConfig
-		}
-		channel, serviceType, creditQty, err := parsePlusIssueProductConfig(product.PlusIssueConfigJSON)
-		if err != nil {
-			return nil, err
-		}
-		req := PlusIssueRequest{
-			ExternalOrderNo:  order.OrderNo,
-			PaymentOrderNo:   paymentOrderNo,
-			TradeID:          strings.TrimSpace(payment.ProviderRef),
-			Channel:          channel,
-			ServiceType:      serviceType,
-			Quantity:         item.Quantity,
-			ExpectedAmount:   payment.Amount.Decimal.String(),
-			ExpectedCurrency: strings.ToUpper(strings.TrimSpace(payment.Currency)),
-			Note:             "dujiao:" + order.OrderNo,
-			CreditQuantity:   creditQty,
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
-		resp, issueErr := s.plusIssuer.IssueCards(ctx, cfg.BaseURL, cfg.APIToken, req)
-		cancel()
-		if issueErr != nil {
-			return nil, fmt.Errorf("plus issue for order %s: %w", order.OrderNo, issueErr)
-		}
-		lines = append(lines, resp.Cards...)
+	// One bepusdt trade_id can only fund one mall order on plus. Multi-line carts would need
+	// separate payments, so plus_issue is limited to a single product line per order.
+	if len(order.Items) != 1 {
+		return nil, ErrPlusIssueProductConfig
 	}
+	item := order.Items[0]
+	if item.ProductID == 0 || item.Quantity <= 0 {
+		return nil, ErrFulfillmentInvalid
+	}
+	product, err := s.productReader.GetByID(strconv.FormatUint(uint64(item.ProductID), 10))
+	if err != nil || product == nil {
+		return nil, ErrPlusIssueProductConfig
+	}
+	channel, serviceType, creditQty, err := parsePlusIssueProductConfig(product.PlusIssueConfigJSON)
+	if err != nil {
+		return nil, err
+	}
+	req := PlusIssueRequest{
+		ExternalOrderNo:  order.OrderNo,
+		PaymentOrderNo:   paymentOrderNo,
+		TradeID:          strings.TrimSpace(payment.ProviderRef),
+		Channel:          channel,
+		ServiceType:      serviceType,
+		Quantity:         item.Quantity,
+		ExpectedAmount:   payment.Amount.Decimal.String(),
+		ExpectedCurrency: strings.ToUpper(strings.TrimSpace(payment.Currency)),
+		Note:             "dujiao:" + order.OrderNo,
+		CreditQuantity:   creditQty,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	resp, issueErr := s.plusIssuer.IssueCards(ctx, cfg.BaseURL, cfg.APIToken, req)
+	cancel()
+	if issueErr != nil {
+		return nil, fmt.Errorf("plus issue for order %s: %w", order.OrderNo, issueErr)
+	}
+	lines := resp.Cards
 
 	now := time.Now()
 	payload := strings.Join(lines, "\n")
@@ -207,22 +210,14 @@ func loadPlusIssueSiteConfig(settings *settingsapp.Service) (plusIssueSiteConfig
 	if settings == nil {
 		return plusIssueSiteConfig{}, ErrPlusIssueNotConfigured
 	}
-	raw, err := settings.GetByKey(constants.SettingKeyPlusIssueConfig)
-	if err != nil || raw == nil {
+	runtime, err := settings.GetPlusIssueRuntime()
+	if err != nil {
+		return plusIssueSiteConfig{}, fmt.Errorf("%w: %v", ErrPlusIssueNotConfigured, err)
+	}
+	if !runtime.Enabled || runtime.BaseURL == "" || runtime.APIToken == "" {
 		return plusIssueSiteConfig{}, ErrPlusIssueNotConfigured
 	}
-	baseURL, _ := raw["base_url"].(string)
-	apiToken, _ := raw["api_token"].(string)
-	enabled := true
-	if v, ok := raw["enabled"].(bool); ok {
-		enabled = v
-	}
-	baseURL = strings.TrimSpace(baseURL)
-	apiToken = strings.TrimSpace(apiToken)
-	if !enabled || baseURL == "" || apiToken == "" {
-		return plusIssueSiteConfig{}, ErrPlusIssueNotConfigured
-	}
-	return plusIssueSiteConfig{BaseURL: baseURL, APIToken: apiToken}, nil
+	return plusIssueSiteConfig{BaseURL: runtime.BaseURL, APIToken: runtime.APIToken}, nil
 }
 
 func parsePlusIssueProductConfig(raw jsonmap.JSON) (channel, serviceType string, credit *int, err error) {

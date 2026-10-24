@@ -480,6 +480,7 @@ const messages = {
       fulfillmentTypes: {
         manual: '人工交付',
         auto: '自动交付',
+        plus_issue: 'Plus 零库存发卡',
       },
       fulfillmentStatuses: {
         pending: '待交付',
@@ -996,6 +997,7 @@ const messages = {
         fulfillmentTypes: {
           manual: '人工交付',
           auto: '自动交付',
+          plus_issue: 'Plus 零库存发卡',
         },
         fulfillmentStatuses: {
           pending: '待交付',
@@ -1547,6 +1549,7 @@ const messages = {
         fulfillmentType: {
           manual: '人工交付',
           auto: '自动交付',
+          plus_issue: 'Plus 零库存发卡',
         },
         mappedProduct: '对接商品',
         mappedFulfillmentLocked: '对接商品交付类型由上游管理，不可修改',
@@ -1648,6 +1651,13 @@ const messages = {
           skuSortPlaceholder: '0',
           skuSortTip: '数值越大越靠前',
           skuActive: '启用 SKU',
+          plusIssueTitle: 'Plus 发卡配置',
+          plusIssueTip: '支付成功后按以下映射向 plus 申请卡密，库存按无限展示。需先在 系统设置 → Plus 发卡 中配置服务地址与 Token。',
+          plusIssueChannel: '卡密通道 (channel)',
+          plusIssueServiceType: '商品类型 (service_type)',
+          plusIssueCreditQuantity: 'Codex 额度 (可选)',
+          plusIssueServiceTypeTip: 'service_type 需与 plus 后台卡密类型一致，例如 plus、go、gpt_pro_5x、codex。Codex 额度仅 codex 类型生效，留空使用默认值。',
+          plusIssueServiceTypeRequired: 'Plus 发卡商品必须填写 service_type',
           manualFormSchemaTitle: '人工交付表单配置',
           manualFormSchemaTip: '按字段组合用户下单时需要填写的信息，并支持多语言文案。',
           manualFormEmpty: '暂无字段，点击“新增字段”开始配置。',
@@ -2882,6 +2892,7 @@ const messages = {
           callbackRoutes: '回调路由 (Callback Routes)',
           orderRiskControl: '订单风控 (Risk Control)',
           upstreamSync: '上游同步 (Upstream Sync)',
+          plusIssue: 'Plus 发卡 (Plus Issue)',
         },
         homeAnnouncement: {
           title: '首页公告',
@@ -2949,6 +2960,18 @@ const messages = {
             subtitle: '同时影响游客和会员。每行一个 IP 或 CIDR；游客邮箱不参与任何风控判断。',
             placeholder: '每行一个 IP 地址，例如：\n1.2.3.4\n5.6.7.0/24',
           },
+        },
+        plusIssue: {
+          title: 'Plus 零库存发卡',
+          subtitle: '用户支付成功后，由商城调用 plus 兑换站即时签发卡密，商城不再预存卡密。',
+          enabled: '启用 Plus 发卡',
+          enabledHint: '关闭后 plus_issue 类型商品的订单会停在交付中，需人工处理。',
+          baseURL: 'Plus 服务地址',
+          baseURLHint: 'plus 兑换站后端 Go 服务地址。与商城同机部署时填 http://127.0.0.1:18081（端口以 plus 的 GO_API_ADDRESS 为准），无需带 /api 路径。',
+          apiToken: 'API Token',
+          apiTokenHint: '与 plus 服务端环境变量 MALL_ISSUE_API_TOKEN 保持一致。Token 加密保存，不会回显。',
+          apiTokenSet: '已设置，留空则不修改',
+          requiredError: '启用时必须填写 Plus 服务地址和 API Token',
         },
         upstreamSync: {
           title: '上游同步配置',
@@ -5087,6 +5110,7 @@ const messages = {
       fulfillmentTypes: {
         manual: '人工交付',
         auto: '自動交付',
+        plus_issue: 'Plus 零庫存發卡',
       },
       fulfillmentStatuses: {
         pending: '待交付',
@@ -5603,6 +5627,7 @@ const messages = {
         fulfillmentTypes: {
           manual: '人工交付',
           auto: '自動交付',
+          plus_issue: 'Plus 零庫存發卡',
         },
         fulfillmentStatuses: {
           pending: '待交付',
@@ -6154,6 +6179,7 @@ const messages = {
         fulfillmentType: {
           manual: '人工交付',
           auto: '自動交付',
+          plus_issue: 'Plus 零庫存發卡',
         },
         mappedProduct: '對接商品',
         mappedFulfillmentLocked: '對接商品交付類型由上游管理，不可修改',
@@ -6255,6 +6281,13 @@ const messages = {
           skuSortPlaceholder: '0',
           skuSortTip: '數值越大越靠前',
           skuActive: '啟用 SKU',
+          plusIssueTitle: 'Plus 發卡設定',
+          plusIssueTip: '付款成功後按以下映射向 plus 申請卡密，庫存按無限顯示。需先在 系統設定 → Plus 發卡 中設定服務地址與 Token。',
+          plusIssueChannel: '卡密通道 (channel)',
+          plusIssueServiceType: '商品類型 (service_type)',
+          plusIssueCreditQuantity: 'Codex 額度 (選填)',
+          plusIssueServiceTypeTip: 'service_type 需與 plus 後台卡密類型一致，例如 plus、go、gpt_pro_5x、codex。Codex 額度僅 codex 類型生效，留空使用預設值。',
+          plusIssueServiceTypeRequired: 'Plus 發卡商品必須填寫 service_type',
           manualFormSchemaTitle: '人工交付表單設定',
           manualFormSchemaTip: '可組合下單時需填寫的欄位，並支援多語系文案。',
           manualFormEmpty: '尚無欄位，點擊「新增欄位」開始設定。',
@@ -7489,6 +7522,7 @@ const messages = {
           callbackRoutes: '回調路由 (Callback Routes)',
           orderRiskControl: '訂單風控 (Risk Control)',
           upstreamSync: '上游同步 (Upstream Sync)',
+          plusIssue: 'Plus 發卡 (Plus Issue)',
         },
         homeAnnouncement: {
           title: '首頁公告',
@@ -7556,6 +7590,18 @@ const messages = {
             subtitle: '同時影響遊客和會員。每行一個 IP 或 CIDR；遊客郵箱不參與任何風控判斷。',
             placeholder: '每行一個 IP 地址，例如：\n1.2.3.4\n5.6.7.0/24',
           },
+        },
+        plusIssue: {
+          title: 'Plus 零庫存發卡',
+          subtitle: '使用者付款成功後，由商城呼叫 plus 兌換站即時簽發卡密，商城不再預存卡密。',
+          enabled: '啟用 Plus 發卡',
+          enabledHint: '關閉後 plus_issue 類型商品的訂單會停在交付中，需人工處理。',
+          baseURL: 'Plus 服務地址',
+          baseURLHint: 'plus 兌換站後端 Go 服務地址。與商城同機部署時填 http://127.0.0.1:18081（連接埠以 plus 的 GO_API_ADDRESS 為準），無需帶 /api 路徑。',
+          apiToken: 'API Token',
+          apiTokenHint: '與 plus 服務端環境變數 MALL_ISSUE_API_TOKEN 保持一致。Token 加密保存，不會回顯。',
+          apiTokenSet: '已設定，留空則不修改',
+          requiredError: '啟用時必須填寫 Plus 服務地址和 API Token',
         },
         upstreamSync: {
           title: '上游同步配置',
@@ -9694,6 +9740,7 @@ const messages = {
       fulfillmentTypes: {
         manual: 'Manual',
         auto: 'Auto',
+        plus_issue: 'Plus zero-inventory issue',
       },
       fulfillmentStatuses: {
         pending: 'Pending',
@@ -10210,6 +10257,7 @@ const messages = {
         fulfillmentTypes: {
           manual: 'Manual',
           auto: 'Auto',
+          plus_issue: 'Plus zero-inventory issue',
         },
         fulfillmentStatuses: {
           pending: 'Pending',
@@ -10761,6 +10809,7 @@ const messages = {
         fulfillmentType: {
           manual: 'Manual',
           auto: 'Auto',
+          plus_issue: 'Plus zero-inventory issue',
         },
         mappedProduct: 'Mapped',
         mappedFulfillmentLocked: 'Fulfillment type is managed by upstream and cannot be changed',
@@ -10862,6 +10911,13 @@ const messages = {
           skuSortPlaceholder: '0',
           skuSortTip: 'Higher value appears earlier',
           skuActive: 'Active SKU',
+          plusIssueTitle: 'Plus issue settings',
+          plusIssueTip: 'After payment, card codes are requested from plus with this mapping. Stock is shown as unlimited. Configure the service URL and token under Settings → Plus Issue first.',
+          plusIssueChannel: 'Card channel (channel)',
+          plusIssueServiceType: 'Product type (service_type)',
+          plusIssueCreditQuantity: 'Codex credits (optional)',
+          plusIssueServiceTypeTip: 'service_type must match a card type in plus, e.g. plus, go, gpt_pro_5x, codex. Codex credits only apply to codex; leave empty for the default.',
+          plusIssueServiceTypeRequired: 'service_type is required for Plus issue products',
           manualFormSchemaTitle: 'Manual delivery form schema',
           manualFormSchemaTip: 'Configure fields users must submit at checkout with localized labels.',
           manualFormEmpty: 'No fields yet. Click "Add field" to start.',
@@ -12096,6 +12152,7 @@ const messages = {
           callbackRoutes: 'Callback Routes',
           orderRiskControl: 'Risk Control',
           upstreamSync: 'Upstream Sync',
+          plusIssue: 'Plus Issue',
         },
         homeAnnouncement: {
           title: 'Home Announcement',
@@ -12163,6 +12220,18 @@ const messages = {
             subtitle: 'Applies to guests and members. Enter one IP or CIDR per line. Guest email is never used for risk decisions.',
             placeholder: 'One IP per line, e.g.:\n1.2.3.4\n5.6.7.0/24',
           },
+        },
+        plusIssue: {
+          title: 'Plus zero-inventory issue',
+          subtitle: 'After payment succeeds, the mall asks the plus redeem site to mint card codes on demand. No card codes are pre-stocked.',
+          enabled: 'Enable Plus issue',
+          enabledHint: 'When disabled, orders for plus_issue products stay in fulfilling for manual handling.',
+          baseURL: 'Plus service URL',
+          baseURLHint: 'URL of the plus backend Go service. On the same server as the mall use http://127.0.0.1:18081 (port from plus GO_API_ADDRESS), no /api suffix.',
+          apiToken: 'API Token',
+          apiTokenHint: 'Must match MALL_ISSUE_API_TOKEN on the plus server. Stored encrypted and never shown again.',
+          apiTokenSet: 'Already set — leave blank to keep it',
+          requiredError: 'Plus service URL and API Token are required when enabled',
         },
         upstreamSync: {
           title: 'Upstream Sync Config',

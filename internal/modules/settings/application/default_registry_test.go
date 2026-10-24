@@ -21,6 +21,7 @@ func TestDefaultSettingRegistryCoversLegacyNormalizedKeys(t *testing.T) {
 		constants.SettingKeyOrderConfig,
 		constants.SettingKeyOrderRiskControlConfig,
 		constants.SettingKeyPaymentConfig,
+		constants.SettingKeyPlusIssueConfig,
 		constants.SettingKeyRegistrationConfig,
 		constants.SettingKeySiteConfig,
 		constants.SettingKeyTelegramAuthConfig,

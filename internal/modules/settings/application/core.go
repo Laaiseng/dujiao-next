@@ -2,6 +2,7 @@ package settingsapp
 
 import (
 	"github.com/dujiao-next/internal/config"
+	"github.com/dujiao-next/internal/constants"
 	settingscontract "github.com/dujiao-next/internal/modules/settings/contract"
 	"github.com/dujiao-next/internal/shared/jsonmap"
 )
@@ -12,6 +13,7 @@ type Service struct {
 	registry              Registry
 	defaultOrderConfig    config.OrderConfig
 	hasDefaultOrderConfig bool
+	encryptKey            []byte
 }
 
 // UpdateResult 包含持久化后的设置值及其声明式外部影响。
@@ -71,6 +73,13 @@ func (s *Service) Update(key string, value map[string]interface{}) (jsonmap.JSON
 func (s *Service) UpdateWithEffects(key string, value map[string]interface{}) (UpdateResult, error) {
 	if s == nil || s.repo == nil {
 		return UpdateResult{}, nil
+	}
+	if key == constants.SettingKeyPlusIssueConfig {
+		prepared, err := s.preparePlusIssueSetting(value)
+		if err != nil {
+			return UpdateResult{}, err
+		}
+		value = prepared
 	}
 	normalized := s.registry.Normalize(key, jsonmap.JSON(value))
 	if err := s.registry.Validate(key, normalized); err != nil {

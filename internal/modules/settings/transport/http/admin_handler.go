@@ -51,6 +51,9 @@ func (h *AdminHandler) Get(c *gin.Context) {
 		response.Success(c, gin.H{})
 		return
 	}
+	if key == constants.SettingKeyPlusIssueConfig {
+		value = settingsapp.MaskPlusIssueSetting(value)
+	}
 
 	response.Success(c, value)
 }
@@ -110,6 +113,10 @@ func (h *AdminHandler) Update(c *gin.Context) {
 	}
 	if result.HasEffect(settingsapp.EffectInvalidateCallbackRoutesCache) {
 		h.settings.InvalidateCallbackRoutesCache()
+	}
+	if key == constants.SettingKeyPlusIssueConfig {
+		response.Success(c, settingsapp.MaskPlusIssueSetting(result.Value))
+		return
 	}
 	response.Success(c, result.Value)
 }

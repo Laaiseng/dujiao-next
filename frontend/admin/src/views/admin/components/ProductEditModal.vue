@@ -155,6 +155,43 @@ const createSKUFormItem = (raw?: Partial<AdminProductSKU>): SKUFormItem => ({
   sort_order: Number(raw?.sort_order || 0),
 })
 
+type PlusIssueConfigForm = {
+  channel: 'mapped_orchestrator' | 'local_pro'
+  service_type: string
+  credit_quantity: number | ''
+}
+
+function createPlusIssueConfig(): PlusIssueConfigForm {
+  return { channel: 'mapped_orchestrator', service_type: 'plus', credit_quantity: '' }
+}
+
+const parsePlusIssueConfig = (raw: unknown): PlusIssueConfigForm => {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const channel = source.channel === 'local_pro' ? 'local_pro' : 'mapped_orchestrator'
+  const credit = Number(source.credit_quantity)
+  return {
+    channel,
+    service_type: String(source.service_type || '').trim() || 'plus',
+    credit_quantity: Number.isFinite(credit) && credit > 0 ? Math.floor(credit) : '',
+  }
+}
+
+const normalizePlusIssueConfigForSubmit = () => {
+  const serviceType = form.plus_issue_config.service_type.trim()
+  if (!serviceType) {
+    throw new Error(t('admin.products.form.plusIssueServiceTypeRequired'))
+  }
+  const config: Record<string, unknown> = {
+    channel: form.plus_issue_config.channel,
+    service_type: serviceType,
+  }
+  const credit = Number(form.plus_issue_config.credit_quantity)
+  if (Number.isFinite(credit) && credit > 0) {
+    config.credit_quantity = Math.floor(credit)
+  }
+  return config
+}
+
 const form = reactive({
   id: 0,
   title: { 'zh-CN': '', 'zh-TW': '', 'en-US': '' } as LocalizedText,
@@ -173,6 +210,7 @@ const form = reactive({
   stock_display_mode: 'exact',
   fulfillment_type: 'manual',
   manual_stock_total: 0,
+  plus_issue_config: createPlusIssueConfig(),
   skus: [] as SKUFormItem[],
   category_id: null as number | null,
   payment_channel_ids: [] as number[],
@@ -517,6 +555,7 @@ const resetForm = () => {
     stock_display_mode: 'exact',
     fulfillment_type: 'manual',
     manual_stock_total: 0,
+    plus_issue_config: createPlusIssueConfig(),
     skus: [],
     category_id: null,
     payment_channel_ids: [],
@@ -566,6 +605,7 @@ const populateForm = (product: AdminProduct) => {
     stock_display_mode: product.stock_display_mode || 'exact',
     fulfillment_type: product.fulfillment_type || 'manual',
     manual_stock_total: resolveManualStockMetrics(product).total,
+    plus_issue_config: parsePlusIssueConfig((product as AdminProduct & { plus_issue_config?: unknown }).plus_issue_config),
     skus: resolveEditableSKURows(product),
     category_id: Number(product.category_id || 0) || null,
     payment_channel_ids: parsePaymentChannelIDs(product.payment_channel_ids),
@@ -623,6 +663,7 @@ const handleSubmit = async () => {
         })()
       : toSafeStockTotal(form.manual_stock_total)
     const productStockUnchanged = isEditing.value && !normalizedSKUs.length && effectiveManualStockTotal === originalManualStockTotal.value
+    const plusIssueConfig = form.fulfillment_type === 'plus_issue' ? normalizePlusIssueConfigForSubmit() : undefined
 
     const payload = {
       slug: String(form.slug || '').trim(),
@@ -642,6 +683,7 @@ const handleSubmit = async () => {
       stock_display_mode: form.stock_display_mode,
       fulfillment_type: form.fulfillment_type,
       manual_stock_total: productStockUnchanged ? undefined : effectiveManualStockTotal,
+      plus_issue_config: plusIssueConfig,
       skus: normalizedSKUs,
       payment_channel_ids: form.payment_channel_ids.length > 0 ? form.payment_channel_ids : [],
       is_affiliate_enabled: form.is_affiliate_enabled,
@@ -863,9 +905,40 @@ watch(
               <SelectContent>
                 <SelectItem value="manual">{{ t('admin.products.fulfillmentType.manual') }}</SelectItem>
                 <SelectItem value="auto">{{ t('admin.products.fulfillmentType.auto') }}</SelectItem>
+                <SelectItem value="plus_issue">{{ t('admin.products.fulfillmentType.plus_issue') }}</SelectItem>
               </SelectContent>
             </Select>
             <p v-if="editingIsMapped" class="mt-1 text-xs text-indigo-600">{{ t('admin.products.mappedFulfillmentLocked') }}</p>
+          </div>
+
+          <div v-if="form.fulfillment_type === 'plus_issue' && !editingIsMapped" class="col-span-1 md:col-span-2 rounded-xl border border-border bg-muted/20 p-4 space-y-4">
+            <div>
+              <h3 class="text-sm font-semibold text-foreground">{{ t('admin.products.form.plusIssueTitle') }}</h3>
+              <p class="text-xs text-muted-foreground mt-1">{{ t('admin.products.form.plusIssueTip') }}</p>
+            </div>
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ t('admin.products.form.plusIssueChannel') }}</label>
+                <Select v-model="form.plus_issue_config.channel">
+                  <SelectTrigger class="h-9 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mapped_orchestrator">mapped_orchestrator</SelectItem>
+                    <SelectItem value="local_pro">local_pro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ t('admin.products.form.plusIssueServiceType') }}</label>
+                <Input v-model="form.plus_issue_config.service_type" placeholder="plus" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1.5">{{ t('admin.products.form.plusIssueCreditQuantity') }}</label>
+                <Input v-model.number="form.plus_issue_config.credit_quantity" type="number" min="0" />
+              </div>
+            </div>
+            <p class="text-xs text-muted-foreground">{{ t('admin.products.form.plusIssueServiceTypeTip') }}</p>
           </div>
 
           <div class="col-span-1">

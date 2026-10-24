@@ -81,7 +81,8 @@ var defaultSettingRegistry = MustNewRegistry(
 		Effects:   []Effect{EffectInvalidateCallbackRoutesCache},
 	},
 	Definition{
-		Key: constants.SettingKeyPlusIssueConfig,
+		Key:       constants.SettingKeyPlusIssueConfig,
+		Normalize: normalizePlusIssueSetting,
 	},
 	Definition{
 		Key:       constants.SettingKeyHomeAnnouncement,
