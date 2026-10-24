@@ -92,6 +92,7 @@ type CreateProductInput struct {
 	ContentJSON          map[string]interface{}
 	InstructionsJSON     map[string]interface{}
 	ManualFormSchemaJSON map[string]interface{}
+	PlusIssueConfigJSON   map[string]interface{}
 	PriceAmount          decimal.Decimal
 	CostPriceAmount      decimal.Decimal
 	// WholesalePrices 为可选字段：nil 表示更新时保留，非 nil 表示整体覆盖。

@@ -84,6 +84,20 @@ func (c *Client) EnqueueOrderAutoFulfill(payload OrderAutoFulfillPayload, opts .
 	return err
 }
 
+// EnqueueOrderPlusIssue 推送 plus 零库存发卡任务
+func (c *Client) EnqueueOrderPlusIssue(payload OrderPlusIssuePayload, opts ...asynq.Option) error {
+	if !c.Enabled() {
+		return nil
+	}
+	task, err := NewOrderPlusIssueTask(payload)
+	if err != nil {
+		return err
+	}
+	options := append([]asynq.Option{asynq.Queue(c.defaultQueue)}, opts...)
+	_, err = c.client.Enqueue(task, options...)
+	return err
+}
+
 // EnqueueAffiliateOrderPaid 推送佣金创建重试任务
 func (c *Client) EnqueueAffiliateOrderPaid(payload AffiliateOrderPaidPayload, opts ...asynq.Option) error {
 	if !c.Enabled() {

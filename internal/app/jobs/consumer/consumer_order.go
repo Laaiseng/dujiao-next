@@ -431,3 +431,49 @@ func buildOrderFulfillmentEmailPayload(order *orderdomain.Order) string {
 	}
 	return strings.Join(parts, "\n\n")
 }
+
+
+// handleOrderPlusIssue 处理 plus 零库存发卡任务。
+func (c *Consumer) handleOrderPlusIssue(_ context.Context, task *asynq.Task) error {
+	if c == nil || task == nil {
+		logger.Debugw("worker_order_plus_issue_skip_nil", "consumer_nil", c == nil, "task_nil", task == nil)
+		return nil
+	}
+	var payload queue.OrderPlusIssuePayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		logger.Warnw("worker_order_plus_issue_unmarshal_failed", "error", err)
+		return err
+	}
+	if payload.OrderID == 0 {
+		return nil
+	}
+	if c.FulfillmentService == nil {
+		logger.Warnw("worker_order_plus_issue_skip_fulfillment_nil", "order_id", payload.OrderID)
+		return nil
+	}
+	_, err := c.FulfillmentService.CreatePlusIssue(payload.OrderID)
+	if err != nil {
+		switch {
+		case errors.Is(err, fulfillmentapp.ErrFulfillmentExists):
+			logger.Debugw("worker_order_plus_issue_skip_exists", "order_id", payload.OrderID)
+			return nil
+		case errors.Is(err, fulfillmentapp.ErrPlusIssueNotPlusType):
+			logger.Debugw("worker_order_plus_issue_skip_not_plus", "order_id", payload.OrderID)
+			return nil
+		case errors.Is(err, orderapp.ErrOrderStatusInvalid):
+			logger.Debugw("worker_order_plus_issue_skip_invalid_status", "order_id", payload.OrderID)
+			return nil
+		case errors.Is(err, orderapp.ErrOrderNotFound):
+			logger.Debugw("worker_order_plus_issue_skip_order_not_found", "order_id", payload.OrderID)
+			return nil
+		case errors.Is(err, fulfillmentapp.ErrPlusIssueNotConfigured), errors.Is(err, fulfillmentapp.ErrPlusIssueProductConfig), errors.Is(err, fulfillmentapp.ErrPlusIssuePaymentMissing):
+			// Permanent config/payment problems: stop retrying and leave order fulfilling for manual delivery.
+			logger.Warnw("worker_order_plus_issue_manual_fallback", "order_id", payload.OrderID, "error", err)
+			return nil
+		default:
+			logger.Warnw("worker_order_plus_issue_failed", "order_id", payload.OrderID, "error", err)
+			return err
+		}
+	}
+	return nil
+}

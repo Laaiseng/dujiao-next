@@ -8,4 +8,5 @@ func (c *Container) wireServiceDependencies() {
 	c.PaymentService.SetProcurementService(c.ProcurementOrderService)
 	c.PaymentService.SetDownstreamCallbackService(c.DownstreamCallbackService)
 	c.FulfillmentService.SetDownstreamCallbackService(c.DownstreamCallbackService)
+	c.FulfillmentService.SetPlusIssueDeps(c.PaymentStore, c.ProductRepo, nil)
 }

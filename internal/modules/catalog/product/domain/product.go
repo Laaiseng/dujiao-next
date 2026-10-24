@@ -30,6 +30,7 @@ type Product struct {
 	StockDisplayMode     string              `gorm:"type:varchar(20);not null;default:'exact'" json:"stock_display_mode"` // 公开库存展示模式（exact/status/range/hidden）
 	FulfillmentType      string              `gorm:"type:varchar(20);not null;default:'manual'" json:"fulfillment_type"`  // 交付类型（auto/manual）
 	ManualFormSchemaJSON jsonmap.JSON        `gorm:"type:json" json:"manual_form_schema"`                                 // 人工交付表单 schema
+	PlusIssueConfigJSON   jsonmap.JSON        `gorm:"type:json" json:"plus_issue_config"`                                   // plus_issue：channel/service_type 映射
 	ManualStockTotal     int                 `gorm:"not null;default:0" json:"manual_stock_total"`                        // 手动剩余库存（-1 表示无限库存，>=0 表示当前可售数量）
 	ManualStockLocked    int                 `gorm:"not null;default:0" json:"manual_stock_locked"`                       // 手动库存占用量（待支付）
 	ManualStockSold      int                 `gorm:"not null;default:0" json:"manual_stock_sold"`                         // 手动库存已售量（支付成功后累加）

@@ -179,7 +179,7 @@ type OrderItemResp struct {
 
 func newOrderItemResp(item *orderdomain.OrderItem) OrderItemResp {
 	ft := item.FulfillmentType
-	if ft == "upstream" {
+	if ft == "upstream" || ft == "plus_issue" {
 		ft = "manual"
 	}
 	return OrderItemResp{
@@ -215,7 +215,7 @@ type FulfillmentResp struct {
 
 func newFulfillmentResp(f *fulfillmentdomain.Fulfillment) FulfillmentResp {
 	typ := f.Type
-	if typ == "upstream" {
+	if typ == "upstream" || typ == "plus_issue" {
 		typ = "manual"
 	}
 	return FulfillmentResp{

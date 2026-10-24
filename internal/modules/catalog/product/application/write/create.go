@@ -105,6 +105,7 @@ func (s *WriteService) Create(input CreateProductInput) (*productdomain.Product,
 		ContentJSON:          jsonmap.JSON(input.ContentJSON),
 		InstructionsJSON:     jsonmap.JSON(input.InstructionsJSON),
 		ManualFormSchemaJSON: jsonmap.JSON{},
+		PlusIssueConfigJSON:   jsonmap.JSON{},
 		PriceAmount:          money.FromDecimal(priceAmount),
 		CostPriceAmount:      money.FromDecimal(costPriceAmount),
 		WholesalePrices:      productdomain.WholesalePriceTiers{},
@@ -129,6 +130,11 @@ func (s *WriteService) Create(input CreateProductInput) (*productdomain.Product,
 			return nil, err
 		}
 		product.ManualFormSchemaJSON = normalizedSchemaJSON
+	}
+	if fulfillmentType == constants.FulfillmentTypePlusIssue {
+		product.PlusIssueConfigJSON = jsonmap.JSON(input.PlusIssueConfigJSON)
+		product.ManualStockTotal = constants.ManualStockUnlimited
+		product.StockDisplayMode = constants.ProductStockDisplayStatus
 	}
 
 	if err := s.transactions.WithinTransaction(func(repositories TransactionRepositories) error {

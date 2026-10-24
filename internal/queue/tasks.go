@@ -13,6 +13,7 @@ const (
 	TaskOrderStatusEmail = constants.TaskOrderStatusEmail
 	// TaskOrderAutoFulfill 自动交付任务
 	TaskOrderAutoFulfill = constants.TaskOrderAutoFulfill
+	TaskOrderPlusIssue   = constants.TaskOrderPlusIssue
 	// TaskOrderTimeoutCancel 超时取消任务
 	TaskOrderTimeoutCancel = constants.TaskOrderTimeoutCancel
 	// TaskWalletRechargeExpire 钱包充值超时过期任务
@@ -52,6 +53,11 @@ type OrderStatusEmailPayload struct {
 
 // OrderAutoFulfillPayload 自动交付任务载荷
 type OrderAutoFulfillPayload struct {
+	OrderID uint `json:"order_id"`
+}
+
+// OrderPlusIssuePayload plus 零库存发卡任务载荷
+type OrderPlusIssuePayload struct {
 	OrderID uint `json:"order_id"`
 }
 
@@ -96,6 +102,14 @@ func NewOrderAutoFulfillTask(payload OrderAutoFulfillPayload) (*asynq.Task, erro
 		return nil, err
 	}
 	return asynq.NewTask(TaskOrderAutoFulfill, body), nil
+}
+
+func NewOrderPlusIssueTask(payload OrderPlusIssuePayload) (*asynq.Task, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(TaskOrderPlusIssue, body), nil
 }
 
 // NewAffiliateOrderPaidTask 创建佣金创建重试任务

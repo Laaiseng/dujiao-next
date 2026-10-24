@@ -1471,6 +1471,7 @@ type affiliateRetryQueue struct {
 
 func (q *affiliateRetryQueue) Enabled() bool                         { return true }
 func (q *affiliateRetryQueue) EnqueueOrderAutoFulfill(uint) error    { return nil }
+func (q *affiliateRetryQueue) EnqueueOrderPlusIssue(uint) error      { return nil }
 func (q *affiliateRetryQueue) EnqueueStatusEmail(uint, string) error { return nil }
 func (q *affiliateRetryQueue) EnqueueTimeoutCancel(uint, time.Duration) error {
 	return nil

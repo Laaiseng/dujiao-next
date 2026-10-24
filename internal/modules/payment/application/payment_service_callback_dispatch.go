@@ -82,6 +82,16 @@ func (s *PaymentService) enqueueOrderPaidAsync(order *orderdomain.Order, payment
 					)
 				}
 			}
+			if shouldPlusIssue(&child) {
+				if err := s.queue.EnqueueOrderPlusIssue(child.ID); err != nil {
+					log.Warnw("payment_enqueue_plus_issue_failed",
+						"order_id", order.ID,
+						"child_order_id", child.ID,
+						"order_no", order.OrderNo,
+						"error", err,
+					)
+				}
+			}
 		}
 		// 上游采购：为包含上游交付类型的订单创建采购单
 		s.enqueueProcurementAsync(order, log)
@@ -95,6 +105,15 @@ func (s *PaymentService) enqueueOrderPaidAsync(order *orderdomain.Order, payment
 	if shouldAutoFulfill(order) {
 		if err := s.queue.EnqueueOrderAutoFulfill(order.ID); err != nil {
 			log.Warnw("payment_enqueue_auto_fulfill_failed",
+				"order_id", order.ID,
+				"order_no", order.OrderNo,
+				"error", err,
+			)
+		}
+	}
+	if shouldPlusIssue(order) {
+		if err := s.queue.EnqueueOrderPlusIssue(order.ID); err != nil {
+			log.Warnw("payment_enqueue_plus_issue_failed",
 				"order_id", order.ID,
 				"order_no", order.OrderNo,
 				"error", err,

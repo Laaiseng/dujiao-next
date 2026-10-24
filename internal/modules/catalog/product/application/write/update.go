@@ -108,6 +108,16 @@ func (s *WriteService) Update(id string, input CreateProductInput) (*productdoma
 		}
 		product.ManualFormSchemaJSON = normalizedSchemaJSON
 	}
+	if fulfillmentType == constants.FulfillmentTypePlusIssue {
+		product.PlusIssueConfigJSON = jsonmap.JSON(input.PlusIssueConfigJSON)
+		product.ManualStockTotal = constants.ManualStockUnlimited
+		if strings.TrimSpace(product.StockDisplayMode) == "" || product.StockDisplayMode == constants.ProductStockDisplayExact {
+			product.StockDisplayMode = constants.ProductStockDisplayStatus
+		}
+	} else if input.PlusIssueConfigJSON != nil {
+		product.PlusIssueConfigJSON = jsonmap.JSON(input.PlusIssueConfigJSON)
+	}
+
 
 	manualStockTotal := product.ManualStockTotal
 	if input.ManualStockTotal != nil {

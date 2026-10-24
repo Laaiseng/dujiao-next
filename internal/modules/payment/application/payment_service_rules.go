@@ -132,7 +132,7 @@ func shouldMarkFulfilling(order *orderdomain.Order) bool {
 	}
 	for _, item := range order.Items {
 		fulfillmentType := strings.TrimSpace(item.FulfillmentType)
-		if fulfillmentType == "" || fulfillmentType == constants.FulfillmentTypeManual || fulfillmentType == constants.FulfillmentTypeUpstream {
+		if fulfillmentType == "" || fulfillmentType == constants.FulfillmentTypeManual || fulfillmentType == constants.FulfillmentTypeUpstream || fulfillmentType == constants.FulfillmentTypePlusIssue {
 			return true
 		}
 	}
@@ -204,6 +204,18 @@ func shouldAutoFulfill(order *orderdomain.Order) bool {
 	}
 	for _, item := range order.Items {
 		if strings.TrimSpace(item.FulfillmentType) != constants.FulfillmentTypeAuto {
+			return false
+		}
+	}
+	return true
+}
+
+func shouldPlusIssue(order *orderdomain.Order) bool {
+	if order == nil || len(order.Items) == 0 {
+		return false
+	}
+	for _, item := range order.Items {
+		if strings.TrimSpace(item.FulfillmentType) != constants.FulfillmentTypePlusIssue {
 			return false
 		}
 	}

@@ -35,6 +35,7 @@ type Product struct {
 	StockQuantityHidden  bool              `json:"stock_quantity_hidden"`
 	FulfillmentType      string            `json:"fulfillment_type"`
 	ManualFormSchema     jsonmap.JSON      `json:"manual_form_schema"`
+	PlusIssueConfig      jsonmap.JSON      `json:"plus_issue_config,omitempty"`
 	ManualStockAvailable int               `json:"manual_stock_available"`
 	AutoStockAvailable   int64             `json:"auto_stock_available"`
 	StockStatus          string            `json:"stock_status"`

@@ -25,6 +25,7 @@ const (
 	FulfillmentTypeAuto        = "auto"
 	FulfillmentTypeManual      = "manual"
 	FulfillmentTypeUpstream    = "upstream"
+	FulfillmentTypePlusIssue   = "plus_issue"
 	FulfillmentStatusPending   = "pending"
 	FulfillmentStatusDelivered = "delivered"
 )
@@ -382,6 +383,7 @@ const (
 	QueueDefault                    = "default"
 	TaskOrderStatusEmail            = "order:status_email"
 	TaskOrderAutoFulfill            = "order:auto_fulfill"
+	TaskOrderPlusIssue             = "order:plus_issue"
 	TaskOrderTimeoutCancel          = "order:timeout_cancel"
 	TaskWalletRechargeExpire        = "wallet_recharge:timeout_expire"
 	TaskNotificationDispatch        = "notification:dispatch"
@@ -508,6 +510,7 @@ const (
 	SettingFieldUpstreamSyncConcurrency = "sync_conn_concurrency"
 
 	SettingKeyCallbackRoutesConfig = "callback_routes_config"
+	SettingKeyPlusIssueConfig     = "plus_issue_config"
 
 	SettingKeyHomeAnnouncement   = "home_announcement"
 	SettingFieldPaymentCallback  = "payment_callback"

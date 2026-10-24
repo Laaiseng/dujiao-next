@@ -12,6 +12,7 @@ import (
 	externalidentitycontract "github.com/dujiao-next/internal/modules/identity/externalidentity/contract"
 	orderapp "github.com/dujiao-next/internal/modules/order/application"
 	ordercontract "github.com/dujiao-next/internal/modules/order/contract"
+	paymentcontract "github.com/dujiao-next/internal/modules/payment/contract"
 	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
 	settingsapp "github.com/dujiao-next/internal/modules/settings/application"
 
@@ -32,6 +33,9 @@ type Service struct {
 	defaultEmailConfig    config.EmailConfig
 	downstreamCallbackSvc DownstreamCallbackEnqueuer
 	userOAuthIdentityRepo externalidentitycontract.Store
+	paymentStore          paymentcontract.Store
+	productReader         productReader
+	plusIssuer            PlusIssuer
 }
 
 type BotNotifier interface {

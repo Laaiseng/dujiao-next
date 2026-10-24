@@ -46,6 +46,8 @@ func NormalizeFulfillmentType(raw string) string {
 		return constants.FulfillmentTypeAuto
 	case constants.FulfillmentTypeUpstream:
 		return constants.FulfillmentTypeUpstream
+	case constants.FulfillmentTypePlusIssue:
+		return constants.FulfillmentTypePlusIssue
 	default:
 		return ""
 	}

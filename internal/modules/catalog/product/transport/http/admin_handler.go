@@ -220,6 +220,7 @@ type CreateProductRequest struct {
 	ContentJSON         map[string]interface{}   `json:"content"`
 	InstructionsJSON    map[string]interface{}   `json:"instructions"`
 	ManualFormSchema    map[string]interface{}   `json:"manual_form_schema"`
+	PlusIssueConfig     map[string]interface{}   `json:"plus_issue_config"`
 	PriceAmount         float64                  `json:"price_amount" binding:"required"`
 	CostPriceAmount     float64                  `json:"cost_price_amount"`
 	WholesalePrices     *[]WholesalePriceRequest `json:"wholesale_prices"`
@@ -293,6 +294,7 @@ func (h *AdminProductHandler) CreateProduct(c *gin.Context) {
 		ContentJSON:          req.ContentJSON,
 		InstructionsJSON:     req.InstructionsJSON,
 		ManualFormSchemaJSON: req.ManualFormSchema,
+			PlusIssueConfigJSON:   req.PlusIssueConfig,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
 		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
@@ -385,6 +387,7 @@ func (h *AdminProductHandler) UpdateProduct(c *gin.Context) {
 		ContentJSON:          req.ContentJSON,
 		InstructionsJSON:     req.InstructionsJSON,
 		ManualFormSchemaJSON: req.ManualFormSchema,
+			PlusIssueConfigJSON:   req.PlusIssueConfig,
 		PriceAmount:          decimal.NewFromFloat(req.PriceAmount),
 		CostPriceAmount:      decimal.NewFromFloat(req.CostPriceAmount),
 		WholesalePrices:      toWholesalePriceInputs(req.WholesalePrices),
